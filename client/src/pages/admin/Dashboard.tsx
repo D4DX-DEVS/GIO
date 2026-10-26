@@ -119,10 +119,10 @@ function FilterSelect({
 }
 
 const TONES = {
-  slate: { tile: 'from-slate-700 to-slate-900 text-white', bar: 'bg-slate-700', ring: 'ring-slate-400/40' },
-  amber: { tile: 'from-amber-400 to-orange-500 text-white', bar: 'bg-amber-500', ring: 'ring-amber-400/50' },
-  emerald: { tile: 'from-brand-400 to-brand-600 text-white', bar: 'bg-brand-500', ring: 'ring-brand-400/50' },
-  sky: { tile: 'from-sky-400 to-indigo-500 text-white', bar: 'bg-sky-500', ring: 'ring-sky-400/50' },
+  ink: { tile: 'bg-slate-100 text-slate-700 ring-slate-200', bar: 'bg-slate-700', ring: 'border-slate-400 ring-slate-300/60' },
+  amber: { tile: 'bg-amber-50 text-amber-700 ring-amber-100', bar: 'bg-amber-500', ring: 'border-amber-300 ring-amber-200/70' },
+  wine: { tile: 'bg-brand-50 text-brand-600 ring-brand-100', bar: 'bg-brand-600', ring: 'border-brand-300 ring-brand-200/70' },
+  green: { tile: 'bg-emerald-50 text-emerald-700 ring-emerald-100', bar: 'bg-emerald-600', ring: 'border-emerald-300 ring-emerald-200/70' },
 } as const;
 
 function StatCard({
@@ -155,28 +155,28 @@ function StatCard({
       aria-pressed={active}
       style={{ animationDelay: `${delay}ms` }}
       className={cx(
-        'group relative flex min-w-0 animate-fade-up flex-col overflow-hidden rounded-2xl border border-slate-200/70 bg-white p-4 text-left shadow-panel transition duration-200 hover:-translate-y-0.5 hover:shadow-lift focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-500/25 sm:p-5',
+        'group relative flex min-w-0 animate-fade-up flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-4 text-left shadow-panel transition duration-200 hover:border-slate-300 hover:shadow-soft focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-600/20 sm:p-5',
         active && cx('ring-2', t.ring)
       )}
     >
       <div className="flex items-start justify-between gap-3">
-        <span className={cx('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br shadow-sm sm:h-11 sm:w-11', t.tile)}>
-          <Icon className="h-5 w-5" />
+        <span className="min-w-0 text-[12px] font-semibold uppercase leading-snug tracking-[0.1em] text-slate-500">{label}</span>
+        <span className={cx('flex h-9 w-9 shrink-0 items-center justify-center rounded-full ring-1 ring-inset', t.tile)}>
+          <Icon className="h-[18px] w-[18px]" />
         </span>
-        <ArrowRight className="h-4 w-4 -translate-x-1 text-slate-300 opacity-0 transition group-hover:translate-x-0 group-hover:opacity-100" aria-hidden />
       </div>
-      <span className="mt-4 text-[13px] font-medium leading-snug text-slate-500">{label}</span>
       {value === undefined ? (
-        <Skeleton className="mt-2 h-8 w-16" />
+        <Skeleton className="mt-3 h-10 w-16" />
       ) : (
-        <span className="mt-1 text-[28px] font-bold leading-none tracking-tight tabular-nums text-slate-900 sm:text-[32px]">
-          {value.toLocaleString()}
-        </span>
+        <span className="mt-2 font-serif text-[40px] leading-none tabular-nums text-slate-900 sm:text-[48px]">{value.toLocaleString()}</span>
       )}
-      <span className="mt-4 block h-1.5 overflow-hidden rounded-full bg-slate-100" aria-hidden>
-        <span className={cx('block h-full rounded-full transition-[width] duration-700', t.bar)} style={{ width: `${tone === 'slate' ? (total ? 100 : 0) : share}%` }} />
+      <span className="mt-4 block h-1 overflow-hidden rounded-full bg-slate-100" aria-hidden>
+        <span className={cx('block h-full rounded-full transition-[width] duration-700', t.bar)} style={{ width: `${tone === 'ink' ? (total ? 100 : 0) : share}%` }} />
       </span>
-      <span className="mt-2 min-h-[1rem] truncate text-xs text-slate-500">{note}</span>
+      <span className="mt-2 flex min-h-[1rem] items-center justify-between gap-2 text-xs text-slate-500">
+        <span className="truncate">{note}</span>
+        <ArrowRight className="h-3.5 w-3.5 shrink-0 -translate-x-1 text-brand-400 opacity-0 transition group-hover:translate-x-0 group-hover:opacity-100" aria-hidden />
+      </span>
     </button>
   );
 }
@@ -196,9 +196,11 @@ function WorkflowStrip({ stats, onPick }: { stats: Stats | null; onPick: (q: Rec
     { label: 'Entry pass sent', hint: 'Through DXing WhatsApp', n: p?.sent, icon: SendHorizontal, q: { status: '', passStatus: 'sent' } },
   ];
   return (
-    <section className="card mt-5 p-4 sm:p-5" aria-label="Registration workflow">
+    <section className="card mt-5 p-4 sm:p-5" aria-labelledby="workflow-title">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-slate-900">Registration workflow</h2>
+        <h2 id="workflow-title" className="display text-[22px] leading-tight">
+          Registration workflow
+        </h2>
         {stats && stats.passSendFailed > 0 && (
           <button
             type="button"
@@ -215,14 +217,14 @@ function WorkflowStrip({ stats, onPick }: { stats: Stats | null; onPick: (q: Rec
             <button
               type="button"
               onClick={() => onPick(s.q)}
-              className="flex w-full items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/70 p-3 text-left transition hover:border-brand-200 hover:bg-brand-50/50"
+              className="flex min-h-[64px] w-full items-center gap-3 rounded-xl border border-slate-200/70 bg-slate-50 p-3 text-left transition hover:border-brand-200 hover:bg-brand-50/60"
             >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-brand-600 shadow-sm ring-1 ring-slate-200/70">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-brand-600 ring-1 ring-inset ring-slate-200">
                 <s.icon className="h-[18px] w-[18px]" aria-hidden />
               </span>
               <span className="min-w-0">
-                <span className="block text-lg font-bold leading-tight tabular-nums text-slate-900">{s.n ?? '–'}</span>
-                <span className="block truncate text-xs font-semibold text-slate-700">{s.label}</span>
+                <span className="block font-serif text-[26px] leading-none tabular-nums text-slate-900">{s.n ?? '–'}</span>
+                <span className="mt-1 block truncate text-xs font-semibold text-slate-700">{s.label}</span>
                 <span className="hidden truncate text-[11px] text-slate-400 sm:block">{s.hint}</span>
               </span>
             </button>
@@ -258,14 +260,14 @@ function RowActions({
 }) {
   const hasPass = r.status === 'confirmed' && r.passStatus !== 'not_generated' && Boolean(r.passId);
   const card = layout === 'card';
-  const iconBtn = 'inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900';
-  const cardBtn = 'inline-flex min-h-[40px] flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-700 transition hover:bg-slate-50';
+  const iconBtn = 'inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-500 transition hover:bg-brand-50 hover:text-brand-700';
+  const cardBtn = 'btn-line inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-full px-3 text-[13px] font-semibold';
 
   const confirm = r.status === 'submitted' && canApprove && (
     <Button
       size={card ? 'md' : 'sm'}
       onClick={() => onAction('confirm', r)}
-      className={cx('bg-gradient-to-b from-brand-500 to-brand-600 shadow-glow hover:from-brand-600 hover:to-brand-700', card && 'w-full')}
+      className={cx('shadow-glow', card && 'w-full')}
     >
       <BadgeCheck className="h-4 w-4" aria-hidden /> Confirm Registration
     </Button>
@@ -580,53 +582,42 @@ export default function Dashboard() {
 
   return (
     <main className="mx-auto w-full max-w-[90rem] px-4 pb-16 pt-5 sm:px-6 lg:px-8 lg:pt-7">
-      {/* Welcome banner */}
-      <section className="relative animate-fade-up overflow-hidden rounded-3xl bg-brand-900 px-5 py-6 text-white shadow-lift sm:px-8 sm:py-7">
-        <div aria-hidden className="absolute inset-0 bg-[radial-gradient(40rem_18rem_at_100%_0%,theme(colors.brand.500/55%),transparent_65%),radial-gradient(30rem_16rem_at_0%_120%,theme(colors.brand.400/30%),transparent_60%)]" />
-        <div
-          aria-hidden
-          className="absolute inset-0 opacity-[0.06] [background-image:linear-gradient(white_1px,transparent_1px),linear-gradient(90deg,white_1px,transparent_1px)] [background-size:28px_28px]"
-        />
-        <div className="relative flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-brand-200">
-              {new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}
-            </p>
-            <h2 className="mt-1 text-2xl font-bold tracking-tight sm:text-[28px]">
-              {greeting()}
-              {firstName && `, ${firstName}`}
-            </h2>
-            <p className="mt-1.5 max-w-xl text-sm text-brand-100/80">
-              {!stats
-                ? 'Loading the latest numbers…'
-                : stats.awaitingConfirmation
-                  ? `${stats.awaitingConfirmation} registration${stats.awaitingConfirmation === 1 ? ' is' : 's are'} awaiting confirmation. Confirming one generates its entry pass and sends it on WhatsApp.`
-                  : 'Every registration is confirmed. New submissions will appear here.'}
-            </p>
-          </div>
-          <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
-            {stats && stats.awaitingConfirmation > 0 && canApprove && (
-              <button
-                type="button"
-                onClick={() => setParam({ status: 'submitted', passStatus: '' })}
-                className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-brand-900 shadow-sm transition hover:bg-brand-50"
-              >
-                <BadgeCheck className="h-4 w-4" aria-hidden /> Review awaiting
-                <span className="rounded-full bg-amber-400 px-1.5 text-[11px] font-bold leading-[18px] text-amber-950">{stats.awaitingConfirmation}</span>
-              </button>
+      {/* Greeting */}
+      <section className="flex animate-fade-up flex-col gap-5 border-b border-slate-200 pb-6 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0">
+          <p className="kicker">{new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}</p>
+          <h2 className="display mt-2 text-[34px] leading-[1.05] sm:text-[44px]">
+            {greeting()}
+            {firstName && (
+              <>
+                , <em className="text-brand-600">{firstName}</em>
+              </>
             )}
-          </div>
+          </h2>
+          <p className="mt-2 max-w-xl text-[15px] leading-relaxed text-slate-500">
+            {!stats
+              ? 'Loading the latest numbers…'
+              : stats.awaitingConfirmation
+                ? `${stats.awaitingConfirmation} registration${stats.awaitingConfirmation === 1 ? ' is' : 's are'} awaiting confirmation. Confirming one generates its entry pass and sends it on WhatsApp.`
+                : 'Every registration is confirmed. New submissions will appear here.'}
+          </p>
         </div>
+        {stats && stats.awaitingConfirmation > 0 && canApprove && (
+          <Button onClick={() => setParam({ status: 'submitted', passStatus: '' })} className="shadow-glow md:shrink-0">
+            <BadgeCheck className="h-4 w-4" aria-hidden /> Review awaiting
+            <span className="rounded-full bg-white/20 px-1.5 text-[11px] font-bold leading-[18px]">{stats.awaitingConfirmation}</span>
+          </Button>
+        )}
       </section>
 
       {/* Summary cards; each one also works as a quick filter */}
-      <div className="mt-5 grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+      <div className="mt-6 grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
         <StatCard
           label="Total Registrations"
           value={s.total}
           total={s.total}
           icon={Users}
-          tone="slate"
+          tone="ink"
           note={stats ? 'All time' : ''}
           active={!status && !passStatus}
           onClick={() => setParam({ status: '', passStatus: '' })}
@@ -648,7 +639,7 @@ export default function Dashboard() {
           value={s.confirmed}
           total={s.total}
           icon={BadgeCheck}
-          tone="emerald"
+          tone="wine"
           note={pct(s.confirmed)}
           active={status === 'confirmed' && !passStatus}
           onClick={() => setParam({ status: status === 'confirmed' ? '' : 'confirmed', passStatus: '' })}
@@ -659,7 +650,7 @@ export default function Dashboard() {
           value={s.passesSent}
           total={s.confirmed}
           icon={SendHorizontal}
-          tone="sky"
+          tone="green"
           note={
             stats?.passSendFailed ? (
               <span className="font-semibold text-red-600">{stats.passSendFailed} failed to send</span>
@@ -706,7 +697,7 @@ export default function Dashboard() {
         <div className="border-b border-slate-100 px-4 pb-4 pt-5 sm:px-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 id="list-title" className="text-base font-semibold text-slate-900">
+              <h2 id="list-title" className="display text-[26px] leading-tight">
                 Registrations
               </h2>
               <p className="text-[13px] text-slate-500">Search, filter and confirm registrations.</p>
@@ -722,12 +713,12 @@ export default function Dashboard() {
                   onClick={() => setParam({ status: v })}
                   className={cx(
                     'inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition',
-                    status === v ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+                    status === v ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 hover:text-slate-900'
                   )}
                 >
                   {l}
                   {n !== undefined && (
-                    <span className={cx('rounded-full px-1.5 text-[11px] tabular-nums', status === v ? 'bg-white/20' : 'bg-white text-slate-500')}>{n}</span>
+                    <span className={cx('rounded-full px-1.5 text-[11px] tabular-nums', status === v ? 'bg-white/20' : 'bg-slate-100 text-slate-500')}>{n}</span>
                   )}
                 </button>
               ))}
@@ -743,7 +734,7 @@ export default function Dashboard() {
                 ref={searchRef}
                 type="search"
                 className="input py-2.5 pl-11 pr-16 text-sm [&::-webkit-search-cancel-button]:hidden"
-                placeholder="Search by name, mobile number or email"
+                placeholder="Search by name, phone, email or place"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 enterKeyHint="search"
@@ -854,6 +845,7 @@ export default function Dashboard() {
                         </Link>
                         <p className="text-xs text-slate-500">
                           <span className="font-mono">{r.regNo}</span> · Age {r.age}
+                          {r.childrenCount ? ` · ${childrenLabel(r.childrenCount)}` : ''}
                         </p>
                       </div>
                       <StatusBadge status={r.status} />
@@ -862,7 +854,10 @@ export default function Dashboard() {
                       <div className="flex min-w-0 items-center gap-2">
                         <dt className="sr-only">Mobile</dt>
                         <Phone className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-                        <dd className="truncate">{r.mobileDisplay}</dd>
+                        <dd className="truncate">
+                          {r.mobileDisplay}
+                          {r.whatsappDisplay && r.whatsapp !== r.mobile && <span className="text-slate-500"> · WhatsApp {r.whatsappDisplay}</span>}
+                        </dd>
                       </div>
                       <div className="flex min-w-0 items-center gap-2">
                         <dt className="sr-only">Email</dt>
@@ -874,6 +869,7 @@ export default function Dashboard() {
                         <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
                         <dd className="truncate">
                           <span className="font-medium text-slate-700">{r.district}</span> · {r.area} · {r.unit}
+                          {r.place && ` · ${r.place}`}
                         </dd>
                       </div>
                     </dl>
@@ -889,9 +885,9 @@ export default function Dashboard() {
               </ul>
 
               {/* Table on desktops */}
-              <div className="hidden lg:block">
+              <div className="hidden overflow-x-auto lg:block">
                 <table className="w-full table-auto text-left text-sm">
-                  <thead className="border-b border-slate-100 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  <thead className="border-b border-slate-200/70 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                     <tr>
                       <SortHeader label="Registrant" sortKey="name" sort={sort} dir={dir} onSort={onSort} className="pl-6" />
                       <th scope="col" className="hidden px-3 py-3 2xl:table-cell">
@@ -935,11 +931,15 @@ export default function Dashboard() {
                                 <span className="xl:hidden"> · Age {r.age}</span>
                               </div>
                               <div className="max-w-[13rem] truncate text-xs text-slate-500 2xl:hidden">{r.mobileDisplay}</div>
+                              {r.whatsappDisplay && r.whatsapp !== r.mobile && (
+                                <div className="max-w-[13rem] truncate text-xs text-slate-500 2xl:hidden">WhatsApp {r.whatsappDisplay}</div>
+                              )}
                             </div>
                           </div>
                         </td>
                         <td className="hidden px-3 py-3.5 2xl:table-cell">
                           <div className="whitespace-nowrap text-slate-700">{r.mobileDisplay}</div>
+                          {r.whatsappDisplay && r.whatsapp !== r.mobile && <div className="whitespace-nowrap text-xs text-slate-500">WhatsApp {r.whatsappDisplay}</div>}
                           <div className="max-w-[15rem] truncate text-xs text-slate-500">{r.email}</div>
                         </td>
                         <td className="hidden px-3 py-3.5 tabular-nums text-slate-700 xl:table-cell">{r.age}</td>
@@ -948,6 +948,11 @@ export default function Dashboard() {
                           <div className="max-w-[11rem] truncate text-xs text-slate-500">
                             {r.area} · {r.unit}
                           </div>
+                          {(r.place || Boolean(r.childrenCount)) && (
+                            <div className="max-w-[11rem] truncate text-xs text-slate-500">
+                              {[r.place, r.childrenCount ? childrenLabel(r.childrenCount) : ''].filter(Boolean).join(' · ')}
+                            </div>
+                          )}
                         </td>
                         <td className="hidden whitespace-nowrap px-3 py-3.5 text-slate-600 xl:table-cell">{formatDate(r.createdAt)}</td>
                         <td className="px-3 py-3.5">
@@ -999,7 +1004,7 @@ export default function Dashboard() {
                         aria-current={p === data.page ? 'page' : undefined}
                         className={cx(
                           'h-9 min-w-[2.25rem] rounded-lg px-2 text-[13px] font-semibold tabular-nums transition',
-                          p === data.page ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+                          p === data.page ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-100'
                         )}
                       >
                         {p}
@@ -1086,3 +1091,5 @@ function ListSkeleton() {
     </div>
   );
 }
+
+const childrenLabel = (n: number) => `${n} ${n === 1 ? 'child' : 'children'}`;

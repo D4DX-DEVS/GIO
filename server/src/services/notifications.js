@@ -11,6 +11,7 @@ const { TEMPLATE } = require('../config/constants');
 const { env } = require('../config/env');
 const dxing = require('../providers/dxing');
 const { buildText } = require('./templates');
+const { getEvent } = require('./site');
 const { toProviderRecipient } = require('../utils/phone');
 const { imageLinkQuery } = require('../utils/passTokens');
 
@@ -30,17 +31,26 @@ function passImageUrl(pass) {
   return `${base}/api/passes/${encodeURIComponent(pass.passId)}/image?v=${q.v}&exp=${q.exp}&sig=${q.sig}`;
 }
 
+/**
+ * The number WhatsApp messages go to: the WhatsApp number given on the form
+ * (version 2), otherwise the mobile number, as for every older registration.
+ */
+function recipientOf(registration) {
+  return registration.whatsapp || registration.mobile;
+}
+
 async function deliver(notification, registration) {
-  const recipient = toProviderRecipient(registration.mobile);
+  const recipient = toProviderRecipient(recipientOf(registration));
+  const event = await getEvent();
   if (notification.template === TEMPLATE.PASS) {
     const pass = await EntryPass.findOne({ registration: registration._id, status: 'active' });
     if (!pass) throw new dxing.ProviderError('No active entry pass for this registration.', { retryable: false });
-    const caption = buildText(notification.template, { registration, pass });
+    const caption = buildText(notification.template, { registration, pass, event });
     // The image link is signed per attempt, so a retry gets a fresh, unexpired link.
     const result = await dxing.sendImage(recipient, passImageUrl(pass), caption);
     return { ...result, message: caption };
   }
-  const message = buildText(notification.template, { registration });
+  const message = buildText(notification.template, { registration, event });
   const result = await dxing.sendText(recipient, message);
   return { ...result, message };
 }
@@ -72,7 +82,7 @@ async function send({ registration, template, dedupeKey, actor }) {
     notification = await Notification.create({
       registration: registration._id,
       template,
-      recipient: registration.mobile,
+      recipient: recipientOf(registration),
       dedupeKey,
       status: 'sending',
       attempts: 1,
@@ -98,7 +108,7 @@ async function retry(notificationId, registration, actor) {
       registration: registration._id,
       $or: [{ status: 'failed' }, { status: 'sending', updatedAt: { $lt: staleBefore } }],
     },
-    { $set: { status: 'sending', ...actorFields(actor) }, $inc: { attempts: 1 } },
+    { $set: { status: 'sending', recipient: recipientOf(registration), ...actorFields(actor) }, $inc: { attempts: 1 } },
     { new: true }
   );
   if (!claimed) return null;
@@ -137,4 +147,4 @@ function lastMessage(registrationId, template) {
   return Notification.findOne({ registration: registrationId, template }).sort({ createdAt: -1 });
 }
 
-module.exports = { send, statusMessage, sendPass, retry, lastMessage, passImageUrl };
+module.exports = { send, statusMessage, sendPass, retry, lastMessage, passImageUrl, recipientOf };

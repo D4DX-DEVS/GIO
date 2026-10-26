@@ -4,7 +4,8 @@
 // country code; input that breaks a rule is rejected, never altered until it
 // passes.
 const { z } = require('zod');
-const { AGE_MIN, AGE_MAX, STATUSES, PASS_STATUSES } = require('../config/constants');
+const { AGE_MIN, AGE_MAX, STATUSES, PASS_STATUSES, FORM_VERSION, PLACE_REQUIRED } = require('../config/constants');
+const { EMPTY_PAGE, childrenEnabled } = require('../config/siteSchema');
 const { matchDistrict } = require('../config/districts');
 const { findCountry } = require('../config/countries');
 const { env } = require('../config/env');
@@ -105,46 +106,151 @@ const district = z.string(required('District')).transform((v, ctx) => {
   return matchDistrict(v) ?? fail(ctx, 'Select a district from the list');
 });
 
-const registrationInput = z
+// Version 1: the original form. Kept unchanged so a form page opened before
+// the new form was deployed still submits.
+const v1Fields = {
+  name,
+  age,
+  countryCode,
+  mobile,
+  email,
+  district,
+  area: place('Area'),
+  unit: place('Unit'),
+  // Honeypot: hidden in the form, real users leave it empty.
+  website: z.string().max(0).optional(),
+};
+
+const registrationInput = z.object(v1Fields).strict();
+
+// Version 2 adds gender, place, a WhatsApp number and accompanying children.
+// Gender and children are checked against the admin-set rules afterwards.
+const optionalPlace = (label) =>
+  z
+    .union([z.literal(''), z.undefined()])
+    .transform(() => undefined)
+    .or(place(label));
+
+const registrationInputV2 = z
   .object({
-    name,
-    age,
-    countryCode,
-    mobile,
-    email,
-    district,
-    area: place('Area'),
-    unit: place('Unit'),
-    // Honeypot: hidden in the form, real users leave it empty.
-    website: z.string().max(0).optional(),
+    ...v1Fields,
+    formVersion: z.literal(FORM_VERSION),
+    gender: z.string({ invalid_type_error: 'Select an option' }).max(30).optional(),
+    place: PLACE_REQUIRED ? place('Place') : optionalPlace('Place'),
+    whatsappSameAsMobile: z.boolean({ required_error: 'Required', invalid_type_error: 'Required' }),
+    whatsapp: z.string({ invalid_type_error: 'WhatsApp number can contain digits only' }).optional(),
+    childrenCount: z
+      .union([z.number(), z.string()], { errorMap: () => ({ message: 'Select the number of children' }) })
+      .optional()
+      .transform((v, ctx) => {
+        if (v === undefined || v === '') return 0;
+        const s = String(v).trim();
+        if (!/^\d{1,2}$/.test(s)) return fail(ctx, 'Select the number of children');
+        return Number(s);
+      }),
+    childAges: z.array(z.union([z.number(), z.string()]), { invalid_type_error: "Enter each child's age" }).max(50).optional(),
   })
   .strict();
 
 function fieldErrors(zodError) {
   const fields = {};
   for (const issue of zodError.issues) {
-    const key = issue.path[0] ? String(issue.path[0]) : '_';
-    if (!fields[key]) fields[key] = issue.code === 'unrecognized_keys' ? 'Unexpected field' : issue.message;
+    const key = issue.path[0] !== undefined ? issue.path.map(String).join('.') : '_';
+    const top = String(issue.path[0] ?? '_');
+    // Child ages are reported per child ("childAges.0"); everything else per field.
+    const k = top === 'childAges' ? key : top;
+    if (!fields[k]) fields[k] = issue.code === 'unrecognized_keys' ? 'Unexpected field' : issue.message;
   }
   return fields;
 }
 
-function parseRegistration(body) {
-  const result = registrationInput.safeParse(body ?? {});
+/** Gender, WhatsApp and children rules that need the admin-set form rules. */
+function checkV2(body, data, rules, fields, e164) {
+  const out = {};
+
+  // Gender: one of the configured options; not asked while none are set.
+  const options = rules.genderOptions || [];
+  const gender = typeof data.gender === 'string' ? data.gender.trim() : '';
+  if (options.length) {
+    const match = options.find((o) => o.toLowerCase() === gender.toLowerCase());
+    if (!gender) fields.gender = 'Please select an option';
+    else if (!match) fields.gender = 'Select an option from the list';
+    else out.gender = match;
+  } else if (gender) fields.gender = 'Unexpected field';
+
+  // WhatsApp: same as the phone number, or its own number with the same country code.
+  if (data.whatsappSameAsMobile) {
+    if (data.whatsapp && data.whatsapp.trim() && e164) {
+      const own = parseMobile(data.countryCode, data.whatsapp);
+      if (own.e164 && own.e164 !== e164) fields.whatsapp = 'Untick "Same as phone number" to use a different WhatsApp number';
+    }
+    out.whatsapp = e164;
+  } else {
+    const raw = typeof data.whatsapp === 'string' ? data.whatsapp.trim() : '';
+    if (!raw) fields.whatsapp = 'Please enter your WhatsApp number';
+    else {
+      const parsed = parseMobile(data.countryCode, raw);
+      if (parsed.error) fields.whatsapp = parsed.error.replace('Mobile number', 'WhatsApp number');
+      else out.whatsapp = parsed.e164;
+    }
+  }
+
+  // Children: the number and one age per child, within the configured limits.
+  const count = data.childrenCount;
+  const ages = Array.isArray(body.childAges) ? body.childAges : [];
+  if (!childrenEnabled(rules)) {
+    // Not asked while the limits are unset, so nothing is recorded.
+    if (count > 0 || ages.length) fields.childrenCount = 'Accompanying children cannot be added at the moment';
+    return out;
+  }
+  if (count > rules.childrenMax) {
+    fields.childrenCount = `At most ${rules.childrenMax} accompanying children`;
+    return out;
+  }
+  if (ages.length !== count) {
+    fields.childrenCount = 'Enter one age for each child';
+    return out;
+  }
+  const children = [];
+  ages.forEach((a, i) => {
+    const s = typeof a === 'number' ? (Number.isInteger(a) ? String(a) : 'x') : String(a).trim();
+    if (!s) fields[`childAges.${i}`] = 'Please enter the age';
+    else if (!/^\d{1,2}$/.test(s)) fields[`childAges.${i}`] = 'Age must contain numbers only';
+    else if (+s < rules.childAgeMin || +s > rules.childAgeMax) fields[`childAges.${i}`] = `Age must be between ${rules.childAgeMin} and ${rules.childAgeMax}`;
+    else children.push({ age: Number(s) });
+  });
+  out.children = children;
+  return out;
+}
+
+/**
+ * Validates a public submission. `rules` are the published form rules
+ * (gender options, children limits); they only apply to form version 2.
+ */
+function parseRegistration(body, rules = EMPTY_PAGE.form) {
+  const input = body ?? {};
+  if (input.formVersion !== undefined && input.formVersion !== FORM_VERSION) {
+    throw new HttpError(400, 'This form is out of date. Please reload the page and try again.', { code: 'form_outdated' });
+  }
+  const v2 = input.formVersion === FORM_VERSION;
+  const result = (v2 ? registrationInputV2 : registrationInput).safeParse(input);
   const fields = result.success ? {} : fieldErrors(result.error);
 
   // Length and format of the number for the chosen country.
   let e164 = null;
-  if (!fields.mobile && !fields.countryCode && typeof body?.mobile === 'string') {
-    const code = result.success ? result.data.countryCode : String(body.countryCode ?? '').trim() || env.defaultCountryCode;
-    const parsed = parseMobile(code, body.mobile);
+  if (!fields.mobile && !fields.countryCode && typeof input.mobile === 'string') {
+    const code = result.success ? result.data.countryCode : String(input.countryCode ?? '').trim() || env.defaultCountryCode;
+    const parsed = parseMobile(code, input.mobile);
     if (parsed.error) fields.mobile = parsed.error;
     else e164 = parsed.e164;
   }
 
+  let extra = {};
+  if (v2 && result.success) extra = checkV2(input, result.data, rules, fields, e164);
+
   if (Object.keys(fields).length) throw new HttpError(400, 'Please correct the highlighted fields.', { fields });
-  const { website, countryCode: _code, ...data } = result.data;
-  return { ...data, mobile: e164 };
+  const { website, countryCode: _code, whatsappSameAsMobile, childrenCount, childAges, gender, whatsapp, ...data } = result.data;
+  return { ...data, mobile: e164, ...extra };
 }
 
 const listQuery = z.object({

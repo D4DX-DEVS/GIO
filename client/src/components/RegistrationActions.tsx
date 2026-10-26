@@ -10,7 +10,7 @@ import { Button, Dialog, cx, useToast } from './ui';
 
 export type ActionKind = 'confirm' | 'resend' | 'generate';
 
-type Target = Pick<RegistrationItem, 'id' | 'name' | 'regNo' | 'mobileDisplay' | 'passId' | 'passStatus'>;
+type Target = Pick<RegistrationItem, 'id' | 'name' | 'regNo' | 'mobileDisplay' | 'messagesTo' | 'passId' | 'passStatus'>;
 
 const ACTIONS: Record<
   ActionKind,
@@ -21,7 +21,7 @@ const ACTIONS: Record<
     confirmLabel: 'Yes, confirm registration',
     path: (id) => `/api/admin/registrations/${id}/actions/confirm`,
     icon: (
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600 ring-1 ring-inset ring-brand-100">
         <BadgeCheck className="h-5 w-5" aria-hidden />
       </span>
     ),
@@ -30,10 +30,10 @@ const ACTIONS: Record<
         <Summary r={r} />
         <p className="mt-4 font-medium text-slate-700">This will:</p>
         <ul className="mt-2 space-y-1.5">
-          {['Mark the registration as Confirmed', 'Generate a unique entry pass', `Send the confirmation and the entry pass to ${r.mobileDisplay} on WhatsApp`].map(
+          {['Mark the registration as Confirmed', 'Generate a unique entry pass', `Send the confirmation and the entry pass to ${r.messagesTo} on WhatsApp`].map(
             (t) => (
               <li key={t} className="flex gap-2">
-                <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden /> {t}
+                <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" aria-hidden /> {t}
               </li>
             )
           )}
@@ -49,7 +49,7 @@ const ACTIONS: Record<
     confirmLabel: 'Resend pass',
     path: (id) => `/api/admin/registrations/${id}/pass/resend`,
     icon: (
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-700">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600 ring-1 ring-inset ring-brand-100">
         <Send className="h-5 w-5" aria-hidden />
       </span>
     ),
@@ -57,7 +57,7 @@ const ACTIONS: Record<
       <>
         <Summary r={r} />
         <p className="mt-4">
-          The same entry pass ({r.passId}) is sent again to {r.mobileDisplay} on WhatsApp. No new pass is created.
+          The same entry pass ({r.passId}) is sent again to {r.messagesTo} on WhatsApp. No new pass is created.
           {r.passStatus === 'sent' && ' Use this only if the registrant did not receive it.'}
         </p>
       </>
@@ -68,14 +68,14 @@ const ACTIONS: Record<
     confirmLabel: 'Generate and send',
     path: (id) => `/api/admin/registrations/${id}/pass/generate`,
     icon: (
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600 ring-1 ring-inset ring-brand-100">
         <Ticket className="h-5 w-5" aria-hidden />
       </span>
     ),
     body: (r) => (
       <>
         <Summary r={r} />
-        <p className="mt-4">Generating the pass failed earlier. A pass is generated now and sent to {r.mobileDisplay} on WhatsApp.</p>
+        <p className="mt-4">Generating the pass failed earlier. A pass is generated now and sent to {r.messagesTo} on WhatsApp.</p>
       </>
     ),
   },
@@ -84,9 +84,10 @@ const ACTIONS: Record<
 function Summary({ r }: { r: Target }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-      <p className="font-semibold text-slate-900">{r.name}</p>
+      <p className="font-serif text-xl leading-tight text-slate-900">{r.name}</p>
       <p className="text-[13px] text-slate-500">
         {r.regNo} · {r.mobileDisplay}
+        {r.messagesTo !== r.mobileDisplay && ` · WhatsApp ${r.messagesTo}`}
       </p>
     </div>
   );
@@ -184,7 +185,7 @@ export function DownloadPassLink({ id, passId, className, children }: { id: stri
       href={passImageUrl(id, passId, true)}
       download={`entry-pass-${passId}.png`}
       className={cx(
-        'inline-flex items-center justify-center gap-2 font-semibold transition focus:outline-none focus-visible:ring-4 focus-visible:ring-slate-400/25',
+        'inline-flex items-center justify-center gap-2 font-semibold transition focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-600/20',
         className
       )}
     >
@@ -270,7 +271,7 @@ export function PassViewer({
                 <Send className="h-4 w-4" aria-hidden /> Resend
               </Button>
             )}
-            <DownloadPassLink id={target.id} passId={target.passId} className="min-h-[44px] rounded-xl bg-brand-600 px-4 text-sm text-white hover:bg-brand-700" />
+            <DownloadPassLink id={target.id} passId={target.passId} className="btn-primary min-h-[44px] rounded-full px-5 text-sm" />
           </>
         )
       }

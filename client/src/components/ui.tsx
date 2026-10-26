@@ -15,20 +15,18 @@ type IconType = ComponentType<{ className?: string }>;
 type Variant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'soft';
 
 const VARIANTS: Record<Variant, string> = {
-  primary:
-    'bg-brand-600 text-white shadow-sm shadow-brand-900/10 hover:bg-brand-700 active:bg-brand-800 focus-visible:ring-brand-500/30 disabled:bg-brand-600/50',
-  secondary:
-    'border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50 active:bg-slate-100 focus-visible:ring-slate-400/25 disabled:text-slate-400',
-  danger: 'bg-red-600 text-white shadow-sm hover:bg-red-700 focus-visible:ring-red-500/30 disabled:bg-red-600/50',
-  ghost: 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-slate-400/25',
-  soft: 'bg-brand-50 text-brand-700 hover:bg-brand-100 focus-visible:ring-brand-500/25 disabled:text-brand-700/50',
+  primary: 'btn-primary',
+  secondary: 'btn-line',
+  danger: 'bg-red-700 text-white hover:bg-red-800 hover:shadow-[0_14px_28px_-16px_rgb(163_17_27/0.7)] active:translate-y-px focus-visible:ring-red-500/30 disabled:bg-red-700/50',
+  ghost: 'text-slate-600 hover:bg-brand-50 hover:text-brand-600 focus-visible:ring-brand-600/15',
+  soft: 'bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-100 hover:bg-brand-100 focus-visible:ring-brand-600/25 disabled:text-brand-700/50',
 };
 
 const SIZES = {
-  lg: 'min-h-[52px] px-6 text-base rounded-xl',
-  md: 'min-h-[44px] px-4 text-sm rounded-xl',
-  sm: 'min-h-[36px] px-3 text-[13px] rounded-lg',
-  icon: 'h-9 w-9 rounded-lg',
+  lg: 'min-h-[52px] px-7 text-[15px] rounded-full',
+  md: 'min-h-[44px] px-5 text-sm rounded-full',
+  sm: 'min-h-[36px] px-3.5 text-[13px] rounded-full',
+  icon: 'h-9 w-9 rounded-full',
 } as const;
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -83,7 +81,7 @@ export function Avatar({ name, className }: { name: string; className?: string }
     <span
       aria-hidden
       className={cx(
-        'flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-100 to-brand-200 font-semibold text-brand-800',
+        'flex shrink-0 items-center justify-center rounded-full bg-brand-50 font-semibold text-brand-700 ring-1 ring-inset ring-brand-100',
         className ?? 'h-10 w-10 text-sm'
       )}
     >
@@ -351,8 +349,8 @@ const STATUS_STYLE: Record<Status, string> = {
 
 const PASS_STYLE: Record<PassStatus, string> = {
   not_generated: 'bg-slate-50 text-slate-500 ring-slate-200 [--dot:theme(colors.slate.300)]',
-  generated: 'bg-violet-50 text-violet-800 ring-violet-200/80 [--dot:theme(colors.violet.500)]',
-  sent: 'bg-sky-50 text-sky-800 ring-sky-200/80 [--dot:theme(colors.sky.500)]',
+  generated: 'bg-brand-50 text-brand-700 ring-brand-200/80 [--dot:theme(colors.brand.400)]',
+  sent: 'bg-emerald-50 text-emerald-800 ring-emerald-200/80 [--dot:theme(colors.emerald.500)]',
   send_failed: 'bg-red-50 text-red-700 ring-red-200/80 [--dot:theme(colors.red.500)]',
 };
 
@@ -383,7 +381,7 @@ export function Alert({
   const styles = {
     error: 'border-red-200 bg-red-50 text-red-800',
     success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
-    info: 'border-sky-200 bg-sky-50 text-sky-800',
+    info: 'border-slate-200 bg-slate-100/70 text-slate-700',
     warning: 'border-amber-200 bg-amber-50 text-amber-900',
   }[tone];
   const Icon = tone === 'success' ? CheckCircle2 : tone === 'info' ? Info : AlertCircle;
@@ -405,10 +403,10 @@ export function Alert({
 export function EmptyState({ icon: Icon, title, children, action }: { icon: IconType; title: string; children?: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex animate-fade-up flex-col items-center px-6 py-14 text-center">
-      <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
-        <Icon className="h-7 w-7" aria-hidden />
+      <span className="flex h-14 w-14 items-center justify-center rounded-full bg-brand-50 text-brand-400 ring-1 ring-inset ring-brand-100">
+        <Icon className="h-6 w-6" aria-hidden />
       </span>
-      <p className="mt-4 font-semibold text-slate-900">{title}</p>
+      <p className="display mt-4 text-[22px] leading-tight">{title}</p>
       {children && <p className="mt-1 max-w-sm text-sm text-slate-500">{children}</p>}
       {action && <div className="mt-5">{action}</div>}
     </div>
@@ -476,7 +474,7 @@ export function Dialog({
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
-      <div className="absolute inset-0 animate-fade-in bg-slate-900/40 backdrop-blur-[2px]" onClick={onClose} aria-hidden />
+      <div className="absolute inset-0 animate-fade-in bg-slate-950/45 backdrop-blur-[2px]" onClick={onClose} aria-hidden />
       <div
         ref={ref}
         role="dialog"
@@ -491,7 +489,7 @@ export function Dialog({
         <div className="flex items-start gap-3 px-5 pb-1 pt-4 sm:px-6 sm:pt-6">
           {icon}
           <div className="min-w-0 flex-1">
-            <h2 id={titleId} className="text-lg font-semibold text-slate-900">
+            <h2 id={titleId} className="display text-[26px] leading-[1.1]">
               {title}
             </h2>
             {description && <div className="mt-1 text-sm text-slate-500">{description}</div>}
@@ -522,7 +520,7 @@ type Toast = { id: number; tone: 'success' | 'error' | 'info'; text: string };
 const ToastContext = createContext<(tone: Toast['tone'], text: string) => void>(() => {});
 
 const TOAST_ICON = { success: CheckCircle2, error: AlertCircle, info: Info };
-const TOAST_TONE = { success: 'text-emerald-500', error: 'text-red-500', info: 'text-sky-500' };
+const TOAST_TONE = { success: 'text-emerald-600', error: 'text-red-600', info: 'text-brand-500' };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -545,7 +543,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <div
               key={t.id}
               role={t.tone === 'error' ? 'alert' : 'status'}
-              className="pointer-events-auto flex w-full max-w-sm animate-fade-up items-start gap-3 rounded-xl border border-slate-200 bg-white p-3.5 text-sm text-slate-700 shadow-lift"
+              className="pointer-events-auto flex w-full max-w-sm animate-fade-up items-start gap-3 rounded-xl border border-slate-200 border-l-[3px] border-l-brand-600 bg-white p-3.5 text-sm text-slate-700 shadow-lift"
             >
               <Icon className={cx('mt-0.5 h-[18px] w-[18px] shrink-0', TOAST_TONE[t.tone])} aria-hidden />
               <p className="min-w-0 flex-1">{t.text}</p>

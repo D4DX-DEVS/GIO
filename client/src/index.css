@@ -1,4 +1,8 @@
-@import '@fontsource-variable/inter';
+/* Fonts shared by the public website and the admin console (self-hosted;
+   the CSP allows same-origin fonts only). */
+@import '@fontsource/instrument-serif/400.css';
+@import '@fontsource/instrument-serif/400-italic.css';
+@import '@fontsource-variable/hanken-grotesk/wght.css';
 
 @tailwind base;
 @tailwind components;
@@ -8,7 +12,6 @@
   html {
     -webkit-text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
-    font-feature-settings: 'cv11', 'ss01';
   }
   body {
     @apply bg-slate-50 text-slate-900 antialiased;
@@ -18,7 +21,7 @@
 @layer components {
   .input {
     @apply block w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-[15px] text-slate-900 shadow-sm transition
-      placeholder:text-slate-400 hover:border-slate-300 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/15
+      placeholder:text-slate-400 hover:border-slate-300 focus:border-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-600/10
       disabled:bg-slate-100 disabled:text-slate-500;
   }
   .input-error {
@@ -33,17 +36,40 @@
   /* Native select styled to match the inputs, with its own chevron. */
   .select {
     @apply block w-full cursor-pointer appearance-none rounded-xl border border-slate-200 bg-white py-2.5 pl-3.5 pr-9 text-sm font-medium text-slate-700 shadow-sm transition
-      hover:border-slate-300 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/15;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%2394a3b8'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E");
+      hover:border-slate-300 focus:border-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-600/10;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23786265'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E");
     background-position: right 0.6rem center;
     background-repeat: no-repeat;
     background-size: 1.15rem;
   }
   .select-active {
-    @apply border-brand-300 bg-brand-50/60 text-brand-800;
+    @apply border-brand-300 bg-brand-50 text-brand-800;
+  }
+  /* Buttons, as on the public website (.site .btn and .site .btn.line):
+     pill shape, wine fill with a soft wine glow on hover, outlined variant
+     in wine ink. */
+  .btn-primary {
+    @apply border border-brand-600 bg-brand-600 text-white transition-[background-color,border-color,box-shadow,transform] duration-200
+      hover:border-brand-700 hover:bg-brand-700 hover:shadow-[0_14px_28px_-16px_rgb(90_11_22/0.7)]
+      active:translate-y-px focus-visible:ring-brand-600/25
+      disabled:border-transparent disabled:bg-brand-600/45 disabled:shadow-none disabled:active:translate-y-0;
+  }
+  .btn-line {
+    @apply border border-slate-300 bg-transparent text-brand-600 transition-[background-color,border-color,color,transform] duration-200
+      hover:border-brand-600 hover:bg-[#fffdf9]
+      active:translate-y-px focus-visible:ring-brand-600/15
+      disabled:border-slate-200 disabled:text-slate-400 disabled:hover:bg-transparent disabled:active:translate-y-0;
   }
   .label-caps {
-    @apply text-[11px] font-semibold uppercase tracking-wider text-slate-500;
+    @apply text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500;
+  }
+  /* Small uppercase line above a heading, as on the public website. */
+  .kicker {
+    @apply text-[11.5px] font-semibold uppercase tracking-[0.2em] text-brand-500;
+  }
+  /* Serif display heading used for page and section titles. */
+  .display {
+    @apply font-serif font-normal tracking-[-0.01em] text-slate-900;
   }
 }
 

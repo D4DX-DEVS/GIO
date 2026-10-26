@@ -1,22 +1,31 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
-import { CalendarDays, Check, Copy, MapPin } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Check, Copy } from 'lucide-react';
+import '../site.css';
 import { api, ApiError, errorMessage, newIdempotencyKey } from '../lib/api';
-import type { PublicConfig } from '../lib/types';
-import { instantError, matchDistrict, validateAll, validateField } from '../lib/validation';
+import type { PublicConfig, PublicPage, PublicSite } from '../lib/types';
+import { FALLBACK_SITE, plain } from '../lib/site';
+import { FIELD_ORDER, childAgeError, instantError, matchDistrict, validateAll, validateField } from '../lib/validation';
 import type { Errors, FieldKey, FormValues, Rules } from '../lib/validation';
-import { Alert, Button, Combobox, Dialog, Field, Skeleton, cx } from '../components/ui';
+import { Button, Dialog } from '../components/ui';
+import { SiteHeader } from '../components/SiteChrome';
 
-const EMPTY: FormValues = { name: '', age: '', mobile: '', email: '', district: '', area: '', unit: '' };
-const FIELDS = Object.keys(EMPTY) as FieldKey[];
+const EMPTY: FormValues = { name: '', age: '', gender: '', place: '', district: '', area: '', unit: '', mobile: '', whatsapp: '', email: '' };
 
-type Success = { regNo: string; name: string; mobile: string };
+const ADULTS_NOTE = 'Any accompanying adults must register separately.';
+
+type Success = { regNo: string; name: string; whatsapp: string };
 
 export default function Register() {
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [configError, setConfigError] = useState('');
+  const [page, setPage] = useState<PublicPage>(FALLBACK_SITE.page);
   const [values, setValues] = useState<FormValues>(EMPTY);
-  const [touched, setTouched] = useState<Partial<Record<FieldKey, boolean>>>({});
+  const [sameAsMobile, setSameAsMobile] = useState(true);
+  const [childrenCount, setChildrenCount] = useState(0);
+  const [childAges, setChildAges] = useState<string[]>([]);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [serverErrors, setServerErrors] = useState<Errors>({});
   const [submitting, setSubmitting] = useState(false);
@@ -39,29 +48,52 @@ export default function Register() {
       .catch((err) => setConfigError(errorMessage(err)));
   };
   useEffect(loadConfig, []);
+  useEffect(() => {
+    api<PublicSite>('/api/public/site')
+      .then((s) => setPage(s.page))
+      .catch(() => {});
+  }, []);
 
   const rules: Rules = {
     ageMin: config?.ageMin ?? 10,
     ageMax: config?.ageMax ?? 100,
     districts: config?.districts ?? [],
     country: config?.countries.find((c) => c.dial === config.defaultCountryCode),
+    genderOptions: config?.genderOptions ?? [],
+    placeRequired: config?.placeRequired ?? true,
+    children: config?.children ?? null,
+    sameAsMobile,
   };
-  const shown = (k: FieldKey) => touched[k] || submitAttempted;
+
+  const shown = (k: string) => touched[k] || submitAttempted;
   const errorFor = (k: FieldKey) =>
     serverErrors[k] || (shown(k) ? validateField(k, values[k], rules) : instantError(k, values[k])) || undefined;
-  const isValid = (k: FieldKey) => shown(k) && !errorFor(k) && values[k].trim() !== '';
-  const dirty = FIELDS.some((k) => values[k].trim() !== '');
+  const ageErrorFor = (i: number) =>
+    serverErrors[`childAges.${i}`] || (shown(`childAges.${i}`) ? childAgeError(childAges[i] ?? '', rules) : undefined);
+  const dirty = FIELD_ORDER.some((k) => values[k].trim() !== '') || childrenCount > 0 || !sameAsMobile;
 
-  const set = (k: FieldKey, v: string) => {
-    setValues((all) => ({ ...all, [k]: v }));
+  const clearServer = (k: string) => {
     setServerErrors((s) => ({ ...s, [k]: undefined }));
     setFormError('');
   };
-  const update = (k: FieldKey) => (e: ChangeEvent<HTMLInputElement>) => set(k, e.target.value);
-  const blur = (k: FieldKey) => () => setTouched((t) => ({ ...t, [k]: true }));
+  const set = (k: FieldKey, v: string) => {
+    setValues((all) => ({ ...all, [k]: v }));
+    clearServer(k);
+  };
+  const update = (k: FieldKey) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => set(k, e.target.value);
+  const blur = (k: string) => () => setTouched((t) => ({ ...t, [k]: true }));
+
+  function setCount(n: number) {
+    setChildrenCount(n);
+    setChildAges((a) => Array.from({ length: n }, (_, i) => a[i] ?? ''));
+    clearServer('childrenCount');
+  }
 
   function reset() {
     setValues(EMPTY);
+    setSameAsMobile(true);
+    setChildrenCount(0);
+    setChildAges([]);
     setTouched({});
     setSubmitAttempted(false);
     setServerErrors({});
@@ -69,28 +101,39 @@ export default function Register() {
     idempotencyKey.current = newIdempotencyKey();
   }
 
+  function focusFirst(errs: Errors) {
+    const order = [...FIELD_ORDER, 'childrenCount', ...childAges.map((_, i) => `childAges.${i}`)];
+    const first = order.find((k) => errs[k as keyof Errors]);
+    if (first) formRef.current?.querySelector<HTMLElement>(`[name="${first}"]`)?.focus();
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (submitting) return;
+    if (submitting || !config) return;
     setSubmitAttempted(true);
     setFormError('');
-    const errs = validateAll(values, rules);
+    const errs = validateAll(values, childAges, rules);
     if (Object.keys(errs).length) {
-      const first = FIELDS.find((k) => errs[k]);
-      formRef.current?.querySelector<HTMLInputElement>(`[name="${first}"]`)?.focus();
+      focusFirst(errs);
       return;
     }
 
     setSubmitting(true);
     try {
       const body = {
+        formVersion: config.formVersion,
         name: values.name.trim(),
         age: values.age.trim(),
-        mobile: values.mobile.trim(),
-        email: values.email.trim(),
+        ...(rules.genderOptions.length ? { gender: values.gender } : {}),
+        place: values.place.trim(),
         district: matchDistrict(values.district, rules.districts) ?? values.district.trim(),
         area: values.area.trim(),
         unit: values.unit.trim(),
+        mobile: values.mobile.trim(),
+        whatsappSameAsMobile: sameAsMobile,
+        ...(sameAsMobile ? {} : { whatsapp: values.whatsapp.trim() }),
+        email: values.email.trim(),
+        ...(rules.children ? { childrenCount, childAges: childAges.map((a) => a.trim()) } : {}),
         ...(honeypot.current?.value ? { website: honeypot.current.value } : {}),
       };
       const res = await api<{ regNo: string; name: string }>('/api/public/registrations', {
@@ -98,243 +141,333 @@ export default function Register() {
         body,
         headers: { 'Idempotency-Key': idempotencyKey.current },
       });
-      setSuccess({ regNo: res.regNo, name: res.name, mobile: values.mobile.trim() });
+      setSuccess({ regNo: res.regNo, name: res.name, whatsapp: (sameAsMobile ? values.mobile : values.whatsapp).trim() });
       reset();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
-      if (err instanceof ApiError && err.fields) {
-        setServerErrors(err.fields as Errors);
-        const first = FIELDS.find((k) => err.fields?.[k]);
-        if (first) formRef.current?.querySelector<HTMLInputElement>(`[name="${first}"]`)?.focus();
+      if (err instanceof ApiError && err.code === 'form_outdated') {
+        setFormError('This form was updated. Please reload the page; what you typed will need to be entered again.');
+      } else {
+        if (err instanceof ApiError && err.fields) {
+          setServerErrors(err.fields as Errors);
+          focusFirst(err.fields as Errors);
+        }
+        setFormError(errorMessage(err));
       }
-      setFormError(errorMessage(err));
     } finally {
       setSubmitting(false);
     }
   }
 
-  const input = (k: FieldKey) => cx('input', errorFor(k) && 'input-error', isValid(k) && 'input-valid');
+  const fld = (k: FieldKey, label: string, input: (aria: { id: string; name: string; 'aria-invalid'?: boolean; 'aria-describedby'?: string }) => JSX.Element) => {
+    const err = errorFor(k);
+    return (
+      <div className="fld">
+        <label htmlFor={`r-${k}`}>{label}</label>
+        {input({ id: `r-${k}`, name: k, 'aria-invalid': err ? true : undefined, 'aria-describedby': err ? `r-${k}-err` : undefined })}
+        {err && (
+          <p className="err" id={`r-${k}-err`}>
+            {err}
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  const text = (k: FieldKey, extra: Record<string, unknown> = {}) =>
+    fld(k, LABELS[k], (aria) => <input {...aria} className="ctl" value={values[k]} onChange={update(k)} onBlur={blur(k)} {...extra} />);
+
+  const genderErr = errorFor('gender');
+  const countErr = serverErrors.childrenCount;
+  const eventLine = [config?.eventDate, config?.eventVenue].filter(Boolean).join(' · ');
 
   return (
-    <div className="min-h-dvh bg-slate-50">
-      <header className="bg-brand-900 px-4 pb-24 pt-[max(2rem,env(safe-area-inset-top))] text-white sm:pt-12">
-        <div className="mx-auto max-w-xl">
-          {config ? (
-            <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl">{config.eventName}</h1>
-          ) : (
-            <Skeleton className="h-8 w-3/4 bg-white/15" />
-          )}
-          {(config?.eventDate || config?.eventVenue) && (
-            <p className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm text-brand-100">
-              {config.eventDate && (
-                <span className="inline-flex items-center gap-1.5">
-                  <CalendarDays className="h-4 w-4" aria-hidden /> {config.eventDate}
-                </span>
-              )}
-              {config.eventVenue && (
-                <span className="inline-flex items-center gap-1.5">
-                  <MapPin className="h-4 w-4" aria-hidden /> {config.eventVenue}
-                </span>
-              )}
+    <div className="site">
+      <SiteHeader
+        logo={page.logo}
+        actions={
+          <Link to="/" className="hdr-back">
+            <span aria-hidden="true">←</span> Conference home
+          </Link>
+        }
+      />
+
+      <div className="reg-top">
+        <div className="wrap">
+          <p className="eyebrow">{config ? plain(config.eventName) : plain(page.title)}</p>
+          <h1>Registration</h1>
+          {eventLine && (
+            <p className="event">
+              {[config?.eventDate, config?.eventVenue].filter(Boolean).map((v) => (
+                <span key={v}>{v}</span>
+              ))}
             </p>
           )}
         </div>
-      </header>
+      </div>
 
-      <main className="mx-auto -mt-16 w-full max-w-xl px-4 pb-12">
-        <div className="rounded-2xl border border-slate-200/70 bg-white shadow-lift">
-          {!config && !configError && (
-            <div className="space-y-4 p-6" aria-busy>
-              <Skeleton className="h-6 w-48" />
-              {[0, 1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-12 w-full rounded-xl" />
-              ))}
-            </div>
-          )}
-          {configError && (
-            <div className="p-6">
-              <Alert
-                title="The form could not be loaded"
-                action={
-                  <Button variant="secondary" size="sm" onClick={loadConfig}>
+      <main className="wrap reg-layout">
+        <div>
+          <div className="fpaper">
+            {!config && !configError && (
+              <div aria-busy="true" style={{ display: 'grid', gap: 16 }}>
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <span key={i} className="sk" style={{ height: 50 }} />
+                ))}
+                <span className="sr-only" role="status">
+                  Loading the form…
+                </span>
+              </div>
+            )}
+
+            {configError && (
+              <div role="alert">
+                <p className="form-alert">The form could not be loaded. {configError}</p>
+                <p style={{ marginTop: 16 }}>
+                  <button type="button" className="btn-clear" onClick={loadConfig}>
                     Try again
-                  </Button>
-                }
-              >
-                {configError}
-              </Alert>
-            </div>
-          )}
-
-          {config && success && <SuccessPanel success={success} onAgain={() => setSuccess(null)} />}
-
-          {config && !success && !config.registrationOpen && (
-            <div className="p-6">
-              <Alert tone="info" title="Registrations are closed">
-                Registration for this event is not open at the moment.
-              </Alert>
-            </div>
-          )}
-
-          {config && !success && config.registrationOpen && (
-            <form ref={formRef} onSubmit={onSubmit} noValidate className="space-y-5 p-5 sm:p-7">
-              <div>
-                <h2 className="text-lg font-semibold tracking-tight">Registration form</h2>
-                <p className="mt-0.5 text-sm text-slate-500">All fields are required.</p>
+                  </button>
+                </p>
               </div>
+            )}
 
-              <Field label="Full name" error={errorFor('name')} valid={isValid('name')}>
-                {(p) => (
-                  <input
-                    {...p}
-                    name="name"
-                    className={input('name')}
-                    autoComplete="name"
-                    autoCapitalize="words"
-                    placeholder="Your full name"
-                    maxLength={120}
-                    value={values.name}
-                    onChange={update('name')}
-                    onBlur={blur('name')}
-                  />
+            {config && success && <SuccessPanel success={success} onAgain={() => setSuccess(null)} />}
+
+            {config && !success && !config.registrationOpen && (
+              <div className="closed" role="status">
+                <h2>Registrations are closed</h2>
+                <p>Registration for this event is not open at the moment.</p>
+              </div>
+            )}
+
+            {config && !success && config.registrationOpen && (
+              <form ref={formRef} onSubmit={onSubmit} noValidate className="reg-form">
+                <fieldset className="fsec">
+                  <legend>About you</legend>
+                  {text('name', { autoComplete: 'name', autoCapitalize: 'words', placeholder: 'Your full name', maxLength: 120 })}
+                  <div className="grid2 grid-age">
+                    {text('age', { inputMode: 'numeric', autoComplete: 'off', placeholder: 'Age', maxLength: 3 })}
+                    {rules.genderOptions.length > 0 && (
+                      <div className="fld">
+                        <span className="lbl" id="r-gender-lbl">
+                          Gender
+                        </span>
+                        <div
+                          className="chips"
+                          role="radiogroup"
+                          aria-labelledby="r-gender-lbl"
+                          aria-invalid={genderErr ? true : undefined}
+                          aria-describedby={genderErr ? 'r-gender-err' : undefined}
+                        >
+                          {rules.genderOptions.map((g) => (
+                            <label key={g} className="chip">
+                              <input
+                                type="radio"
+                                name="gender"
+                                value={g}
+                                checked={values.gender === g}
+                                onChange={() => {
+                                  set('gender', g);
+                                  blur('gender')();
+                                }}
+                              />
+                              <span>{g}</span>
+                            </label>
+                          ))}
+                        </div>
+                        {genderErr && (
+                          <p className="err" id="r-gender-err">
+                            {genderErr}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </fieldset>
+
+                <fieldset className="fsec">
+                  <legend>Location</legend>
+                  <div className="grid2">
+                    {text('place', { autoCapitalize: 'words', autoComplete: 'address-level2', placeholder: 'Your place', maxLength: 100 })}
+                    {fld('district', 'District', (aria) => (
+                      <select {...aria} className="ctl" value={matchDistrict(values.district, rules.districts) ?? ''} onChange={update('district')} onBlur={blur('district')}>
+                        <option value="">Select district</option>
+                        {rules.districts.map((d) => (
+                          <option key={d}>{d}</option>
+                        ))}
+                      </select>
+                    ))}
+                  </div>
+                  <div className="grid2">
+                    {text('area', { autoCapitalize: 'words', autoComplete: 'off', placeholder: 'Your area', maxLength: 100 })}
+                    {text('unit', { autoCapitalize: 'words', autoComplete: 'off', placeholder: 'Your unit', maxLength: 100 })}
+                  </div>
+                </fieldset>
+
+                <fieldset className="fsec">
+                  <legend>Contact</legend>
+                  <div className="grid2">
+                    {text('mobile', { type: 'tel', inputMode: 'numeric', pattern: '[0-9]*', autoComplete: 'tel-national', placeholder: '10-digit mobile number', maxLength: 15 })}
+                    {fld('whatsapp', 'WhatsApp number', (aria) => (
+                      <>
+                        <input
+                          {...aria}
+                          className="ctl"
+                          type="tel"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          autoComplete="off"
+                          placeholder="10-digit WhatsApp number"
+                          maxLength={15}
+                          disabled={sameAsMobile}
+                          value={sameAsMobile ? values.mobile : values.whatsapp}
+                          onChange={update('whatsapp')}
+                          onBlur={blur('whatsapp')}
+                        />
+                        <label className="check">
+                          <input
+                            type="checkbox"
+                            checked={sameAsMobile}
+                            onChange={(e) => {
+                              setSameAsMobile(e.target.checked);
+                              clearServer('whatsapp');
+                            }}
+                          />
+                          Same as phone number
+                        </label>
+                      </>
+                    ))}
+                  </div>
+                  {text('email', { type: 'email', inputMode: 'email', autoComplete: 'email', autoCapitalize: 'none', spellCheck: false, placeholder: 'name@example.com', maxLength: 200 })}
+                </fieldset>
+
+                <fieldset className="fsec">
+                  <legend>Accompanying children</legend>
+                  {rules.children && (
+                    <>
+                      <div className="grid2">
+                        <div className="fld">
+                          <label htmlFor="r-childrenCount">Number of accompanying children</label>
+                          <select
+                            id="r-childrenCount"
+                            name="childrenCount"
+                            className="ctl"
+                            value={childrenCount}
+                            aria-invalid={countErr ? true : undefined}
+                            aria-describedby={countErr ? 'r-childrenCount-err' : undefined}
+                            onChange={(e) => setCount(Number(e.target.value))}
+                          >
+                            {Array.from({ length: rules.children.max + 1 }, (_, i) => (
+                              <option key={i} value={i}>
+                                {i}
+                              </option>
+                            ))}
+                          </select>
+                          {countErr && (
+                            <p className="err" id="r-childrenCount-err">
+                              {countErr}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      {childrenCount > 0 && (
+                        <div className="kids">
+                          {childAges.map((a, i) => {
+                            const err = ageErrorFor(i);
+                            const id = `r-childAges-${i}`;
+                            return (
+                              <div className="fld" key={i}>
+                                <label htmlFor={id}>Age of child {i + 1}</label>
+                                <input
+                                  id={id}
+                                  name={`childAges.${i}`}
+                                  className="ctl"
+                                  inputMode="numeric"
+                                  autoComplete="off"
+                                  placeholder="Age"
+                                  maxLength={2}
+                                  value={a}
+                                  aria-invalid={err ? true : undefined}
+                                  aria-describedby={err ? `${id}-err` : undefined}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    setChildAges((all) => all.map((x, j) => (j === i ? v : x)));
+                                    clearServer(`childAges.${i}`);
+                                  }}
+                                  onBlur={blur(`childAges.${i}`)}
+                                />
+                                {err && (
+                                  <p className="err" id={`${id}-err`}>
+                                    {err}
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <p className="note-adults" role="note">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+                      <circle cx="12" cy="12" r="9.5" />
+                      <path d="M12 7.5v5.5M12 16.5v.5" />
+                    </svg>
+                    <span>{ADULTS_NOTE}</span>
+                  </p>
+                </fieldset>
+
+                {/* Honeypot for bots: hidden from people and assistive technology. */}
+                <div aria-hidden="true" style={{ position: 'absolute', left: -9999, width: 0, height: 0, overflow: 'hidden' }}>
+                  <label>
+                    Website
+                    <input ref={honeypot} type="text" name="website" tabIndex={-1} autoComplete="off" />
+                  </label>
+                </div>
+
+                {formError && (
+                  <p className="form-alert" role="alert">
+                    {formError}
+                  </p>
                 )}
-              </Field>
 
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-[8rem_1fr]">
-                <Field label="Age" error={errorFor('age')} valid={isValid('age')}>
-                  {(p) => (
-                    <input
-                      {...p}
-                      name="age"
-                      className={input('age')}
-                      inputMode="numeric"
-                      autoComplete="off"
-                      placeholder="Age"
-                      maxLength={3}
-                      value={values.age}
-                      onChange={update('age')}
-                      onBlur={blur('age')}
-                    />
-                  )}
-                </Field>
-                <Field label="Mobile number" error={errorFor('mobile')} valid={isValid('mobile')}>
-                  {(p) => (
-                    <input
-                      {...p}
-                      name="mobile"
-                      type="tel"
-                      className={input('mobile')}
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      autoComplete="tel-national"
-                      placeholder="10-digit mobile number"
-                      maxLength={15}
-                      value={values.mobile}
-                      onChange={update('mobile')}
-                      onBlur={blur('mobile')}
-                    />
-                  )}
-                </Field>
-              </div>
-
-              <Field label="Email address" error={errorFor('email')} valid={isValid('email')}>
-                {(p) => (
-                  <input
-                    {...p}
-                    name="email"
-                    type="email"
-                    className={input('email')}
-                    inputMode="email"
-                    autoComplete="email"
-                    autoCapitalize="none"
-                    spellCheck={false}
-                    placeholder="name@example.com"
-                    maxLength={200}
-                    value={values.email}
-                    onChange={update('email')}
-                    onBlur={blur('email')}
-                  />
-                )}
-              </Field>
-
-              <Field label="District" error={errorFor('district')} valid={isValid('district')}>
-                {(p) => (
-                  <Combobox
-                    {...p}
-                    name="district"
-                    options={rules.districts}
-                    placeholder="Select or type your district"
-                    emptyText="No district matches. Pick one from the list."
-                    invalid={Boolean(errorFor('district'))}
-                    valid={isValid('district')}
-                    value={values.district}
-                    onChange={(v) => set('district', v)}
-                    onBlur={blur('district')}
-                  />
-                )}
-              </Field>
-
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                <Field label="Area" error={errorFor('area')} valid={isValid('area')}>
-                  {(p) => (
-                    <input
-                      {...p}
-                      name="area"
-                      className={input('area')}
-                      autoComplete="off"
-                      autoCapitalize="words"
-                      placeholder="Your area"
-                      maxLength={100}
-                      value={values.area}
-                      onChange={update('area')}
-                      onBlur={blur('area')}
-                    />
-                  )}
-                </Field>
-                <Field label="Unit" error={errorFor('unit')} valid={isValid('unit')}>
-                  {(p) => (
-                    <input
-                      {...p}
-                      name="unit"
-                      className={input('unit')}
-                      autoComplete="off"
-                      autoCapitalize="words"
-                      placeholder="Your unit"
-                      maxLength={100}
-                      value={values.unit}
-                      onChange={update('unit')}
-                      onBlur={blur('unit')}
-                    />
-                  )}
-                </Field>
-              </div>
-
-              {/* Honeypot for bots: hidden from people and assistive technology. */}
-              <div aria-hidden="true" className="absolute -left-[9999px] h-0 w-0 overflow-hidden">
-                <label>
-                  Website
-                  <input ref={honeypot} type="text" name="website" tabIndex={-1} autoComplete="off" />
-                </label>
-              </div>
-
-              {formError && <Alert>{formError}</Alert>}
-
-              <div className="flex flex-col gap-2 pt-1 sm:flex-row-reverse">
-                <Button type="submit" size="lg" loading={submitting} className="w-full sm:flex-1">
-                  {submitting ? 'Submitting…' : 'Submit registration'}
-                </Button>
-                <Button variant="ghost" size="lg" onClick={() => setConfirmClear(true)} disabled={submitting || !dirty} className="w-full sm:w-auto">
-                  Clear
-                </Button>
-              </div>
-            </form>
-          )}
+                <div className="actions">
+                  <button type="submit" className="btn-submit" disabled={submitting} aria-busy={submitting || undefined}>
+                    {submitting && <span className="spin" aria-hidden />}
+                    {submitting ? 'Submitting…' : (
+                      <>
+                        Submit registration <span aria-hidden="true">→</span>
+                      </>
+                    )}
+                  </button>
+                  <button type="button" className="btn-clear" onClick={() => setConfirmClear(true)} disabled={submitting || !dirty}>
+                    Clear
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+          {config?.supportContact && <p className="help">Need help? Contact {config.supportContact}</p>}
         </div>
 
-        {config?.supportContact && (
-          <p className="mt-6 text-center text-sm text-slate-500">
-            Need help? Contact <span className="font-medium text-slate-700">{config.supportContact}</span>
-          </p>
+        {page.poster && (
+          <aside className="reg-aside" aria-label="Conference">
+            <img src={page.poster.url} alt={page.poster.alt} width={page.poster.width} height={page.poster.height} loading="lazy" />
+            <dl>
+              {[
+                ['Date', page.dateText],
+                ['Location', page.location],
+                ['Venue', page.venue],
+              ]
+                .filter(([, v]) => v)
+                .map(([k, v]) => (
+                  <div key={k}>
+                    <dt>{k}</dt>
+                    <dd>{v}</dd>
+                  </div>
+                ))}
+            </dl>
+          </aside>
         )}
       </main>
 
@@ -364,6 +497,19 @@ export default function Register() {
   );
 }
 
+const LABELS: Record<FieldKey, string> = {
+  name: 'Name',
+  age: 'Age',
+  gender: 'Gender',
+  place: 'Place',
+  district: 'District',
+  area: 'Area',
+  unit: 'Unit',
+  mobile: 'Phone number',
+  whatsapp: 'WhatsApp number',
+  email: 'Email',
+};
+
 function SuccessPanel({ success, onAgain }: { success: Success; onAgain: () => void }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
@@ -376,27 +522,27 @@ function SuccessPanel({ success, onAgain }: { success: Success; onAgain: () => v
     }
   };
   return (
-    <div className="animate-fade-up px-5 py-8 text-center sm:px-8" role="status">
-      <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500 text-white">
-        <Check className="h-7 w-7" strokeWidth={3} aria-hidden />
+    <div className="success" role="status">
+      <span className="tick">
+        <Check size={28} strokeWidth={3} aria-hidden />
       </span>
-      <h2 className="mt-4 text-xl font-semibold tracking-tight">Registration submitted</h2>
-      <p className="mt-2 text-slate-600">Thank you, {success.name}. Please keep your registration number.</p>
-
-      <div className="mx-auto mt-5 inline-flex items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 py-2 pl-5 pr-2">
-        <span className="font-mono text-xl font-bold tracking-wider">{success.regNo}</span>
-        <Button variant="ghost" size="icon" onClick={copy} aria-label="Copy registration number">
-          {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
-        </Button>
-      </div>
-
-      <p className="mx-auto mt-5 max-w-sm text-sm text-slate-600">
-        Your registration is not confirmed yet. Once it is confirmed, your entry pass will be sent on WhatsApp to {success.mobile}.
+      <h2>Registration submitted</h2>
+      <p>Thank you, {success.name}. Please keep your registration number.</p>
+      <span className="regno">
+        {success.regNo}
+        <button type="button" onClick={copy} aria-label="Copy registration number">
+          {copied ? <Check size={18} aria-hidden /> : <Copy size={18} aria-hidden />}
+        </button>
+      </span>
+      <p>Your registration is not confirmed yet. Once it is confirmed, your entry pass will be sent on WhatsApp to {success.whatsapp}.</p>
+      <p className="again">
+        <button type="button" className="btn-clear" onClick={onAgain}>
+          Register another person
+        </button>
+        <Link to="/" className="btn-clear">
+          Back to the conference page
+        </Link>
       </p>
-
-      <Button variant="secondary" className="mt-6 w-full sm:w-auto" onClick={onAgain}>
-        Register another person
-      </Button>
     </div>
   );
 }

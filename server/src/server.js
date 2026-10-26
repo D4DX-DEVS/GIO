@@ -10,6 +10,7 @@ const { createApp } = require('./app');
     createApp().listen(env.port, () => console.log(`[server] http://localhost:${env.port}`));
   } catch (err) {
     console.error('[server] startup failed:', err.message);
+    if (/ECONNREFUSED/.test(err.message)) console.error('[server] MongoDB is not running. For local development, start it with "npm run db" in another terminal.');
     process.exit(1);
   }
 })();

@@ -16,6 +16,16 @@ const entryPassSchema = new mongoose.Schema(
       district: String,
       area: String,
       unit: String,
+      // Only on passes issued for form version 2 registrations.
+      place: String,
+      childrenCount: Number,
+    },
+    // Event details current when the pass was issued (audit only). The pass
+    // image always shows the current published event details.
+    eventSnapshot: {
+      name: String,
+      date: String,
+      venue: String,
     },
     issuedAt: { type: Date, default: Date.now },
     issuedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },

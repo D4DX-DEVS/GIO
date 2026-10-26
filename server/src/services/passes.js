@@ -5,9 +5,16 @@ const { STATUS, PASS_STATUS } = require('../config/constants');
 const { HttpError } = require('../utils/httpError');
 const { generatePassId, parseQrPayload } = require('../utils/passTokens');
 const { renderPass } = require('./passRenderer');
+const { getEvent } = require('./site');
 
+// Details printed on the pass, frozen at issue. Place and the number of
+// accompanying children only exist for registrations from the new form;
+// passes for older registrations keep exactly the original fields.
 function holderSnapshot(r) {
-  return { name: r.name, regNo: r.regNo, district: r.district, area: r.area, unit: r.unit };
+  const holder = { name: r.name, regNo: r.regNo, district: r.district, area: r.area, unit: r.unit };
+  if (r.place) holder.place = r.place;
+  if (Array.isArray(r.children)) holder.childrenCount = r.children.length;
+  return holder;
 }
 
 async function markGenerated(registration, pass) {
@@ -32,12 +39,14 @@ async function issue(registration, actor) {
   const existing = await EntryPass.findOne({ registration: registration._id });
   if (existing) return existing;
 
+  const event = await getEvent();
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
       const pass = await EntryPass.create({
         passId: generatePassId(),
         registration: registration._id,
         holder: holderSnapshot(registration),
+        eventSnapshot: { name: event.name, date: event.date, venue: event.venue },
         issuedBy: actor.id,
       });
       await markGenerated(registration, pass);
@@ -52,8 +61,8 @@ async function issue(registration, actor) {
   throw new Error('Could not allocate a unique pass ID');
 }
 
-function render(pass) {
-  return renderPass(pass);
+async function render(pass) {
+  return renderPass(pass, await getEvent());
 }
 
 /**

@@ -1,6 +1,8 @@
-# Registration Management System
+# GIO Keralam International Conference on Women: website and registration
 
-This is a mobile-first registration app. People register through a public form. Each registration is saved as Submitted. An admin confirms it with one action, which generates an entry pass with a signed QR code and sends it on WhatsApp through DXing.
+The public website for the GIO Keralam International Conference on Women (15 November 2026, Ernakulam), with registration, an admin console for the website content, and the registration workflow below.
+
+People register through a public form. Each registration is saved as Submitted. An admin confirms it with one action, which generates an entry pass with a signed QR code and sends it on WhatsApp through DXing.
 
 This is a standalone application with its own database, configuration and admin accounts. It shares no data, credentials or code with any other project.
 
@@ -10,6 +12,9 @@ This is a standalone application with its own database, configuration and admin 
 - [Local setup](#local-setup)
 - [Configuration (`server/.env`)](#configuration-serverenv)
 - [Creating admin accounts](#creating-admin-accounts)
+- [Conference website](#conference-website)
+- [Registration form](#registration-form)
+- [Image storage](#image-storage)
 - [Registration workflow](#registration-workflow)
 - [DXing WhatsApp integration](#dxing-whatsapp-integration)
 - [Entry passes](#entry-passes)
@@ -36,7 +41,9 @@ gio/
 ├── client/                   # React app
 │   ├── vite.config.ts        # dev proxy /api -> :5100
 │   └── src/
-│       ├── pages/Register.tsx                 # public form (/)
+│       ├── pages/Landing.tsx                  # conference website (/)
+│       ├── pages/Register.tsx                 # public form (/register)
+│       ├── pages/admin/website/               # Website: page content, lists, images
 │       ├── pages/admin/Login.tsx              # /admin/login
 │       ├── pages/admin/Dashboard.tsx          # /admin list, search, sort, filters
 │       ├── pages/admin/RegistrationDetail.tsx # /admin/registrations/:id
@@ -74,9 +81,12 @@ cp server/.env.example server/.env   # then edit; see the next section
 npm run create-admin -- --username yourname --name "Your Name" --role admin
 ```
 
-To develop with hot reload, run the API and the client in two terminals:
+For a local database, `npm run db` starts MongoDB at the host and port in `MONGODB_URI` (for example `mongodb://127.0.0.1:27018/registration_system`), with its data in `server/.data/db`. Keep that terminal open; the server cannot start without it.
+
+To develop with hot reload, run the database, the API and the client in three terminals:
 
 ```bash
+npm run db             # local MongoDB (skip if you use another database)
 npm run dev:server     # API on http://localhost:5100
 npm run dev:client     # UI on http://localhost:5173 (proxies /api to :5100)
 ```
@@ -90,9 +100,12 @@ npm start              # http://localhost:5100 serves the form, /admin and the A
 
 | URL | What |
 |---|---|
-| `/` | Public registration form |
+| `/` | Conference landing page with Register Now |
+| `/register` | Public registration form (`/registration` redirects here) |
+| `/?preview=1` | Landing page with drafts, for signed-in admins |
 | `/admin/login` | Admin sign in. There is no public sign-up page. |
 | `/admin` | Dashboard |
+| `/admin/website` | Website: page content, programme, speakers, announcements, FAQs, gallery, images (admins only) |
 
 `DXING_MODE` defaults to `mock`. In mock mode every message is recorded in the database and shown in the admin panel, but nothing goes to WhatsApp.
 
@@ -111,9 +124,11 @@ All configuration lives on the server. The client contains no secrets.
 | `DXING_INSTANCE_ID` | when live | DXing WhatsApp account/instance. Sent as `account`. |
 | `DXING_BASE_URL` | | Default `https://app.dxing.in/api` |
 | `DXING_TIMEOUT_MS` | | Default 30000 |
-| `EVENT_NAME`, `EVENT_DATE`, `EVENT_VENUE` | | Shown on the form, in messages and on the pass |
+| `EVENT_NAME`, `EVENT_DATE`, `EVENT_VENUE` | | Shown on the form, in messages and on the pass until the website settings are published |
 | `SUPPORT_CONTACT` | | Optional help line added to messages and to the form |
-| `REGISTRATION_OPEN` | | `false` closes the public form |
+| `REGISTRATION_OPEN` | | `false` closes the public form whatever the admin switch says |
+| `ASSET_STORAGE` | yes in production | `gridfs` or `local`; where website images are stored. See [Image storage](#image-storage). |
+| `ASSET_STORAGE_DIR` | | Folder for `ASSET_STORAGE=local` (default `server/.data/assets`) |
 | `DEFAULT_COUNTRY_CODE` | | Default `91`. The form asks for the national number only (digits); this code is added before it is saved and sent to DXing. |
 | `DISTRICTS` | | Optional comma-separated district list. Defaults to the 14 districts of Kerala. |
 | `TRUST_PROXY` | | `1` behind one reverse proxy, so rate limits see real client IPs |
@@ -140,8 +155,66 @@ If you run the command again for an existing username, it resets that account's 
 
 | Role | Can do |
 |---|---|
-| `admin` | Everything: confirm registrations, generate, send or resend passes, retry messages |
-| `staff` | View registrations and verify passes. Cannot confirm registrations or send passes. |
+| `admin` | Everything: confirm registrations, generate, send or resend passes, retry messages, edit and publish the website |
+| `staff` | View registrations and verify passes. Cannot confirm registrations, send passes or edit the website. |
+
+## Conference website
+
+`/` is the landing page (Design C, Minimal). It is built from the published website content (`GET /api/public/site`). If that request fails, or nothing has been published yet, it shows the approved details (title, theme, date, location, and the logo and poster in `client/public/brand/`), and Register Now still works.
+
+**Editing.** Admins edit the website under **Website** in the admin console:
+
+| Page | What |
+|---|---|
+| Page content | Title, introduction, date, location, venue, theme, About, contact, section headings, which sections are shown, the registration-open switch and the registration form rules |
+| Programme, Speakers, Announcements, FAQs, Gallery | Lists. New items are drafts; Publish shows them, Unpublish hides them, Delete removes them. Programme items follow their start time; the others follow the order set with the arrows. |
+| Images | Upload, edit alternative text and caption, replace, delete |
+
+**Drafts and publishing.** Everything has a draft (what admins edit) and a published copy (what visitors see). Save keeps a draft; Publish copies it to the website. **Preview** (`/?preview=1`) shows every draft and hidden section, outlined. Every save carries a version number, so if two admins edit at once the second save is refused with "changed by another admin" instead of overwriting. The last five published versions of the page are kept in `sitesettings.previous`.
+
+While no programme item is published, the website shows "Programme will be announced soon."
+
+**Event details in messages and passes.** The published title, date, location and venue are also used in WhatsApp messages and on entry pass images (`services/site.js`, `getEvent()`). Until the first publish, `EVENT_NAME`, `EVENT_DATE` and `EVENT_VENUE` are used. Holder details on a pass are frozen when it is issued. The publish dialog says how many passes have already been issued.
+
+**Registration open.** The form is open only when `REGISTRATION_OPEN` is not `false` **and** the admin switch is on.
+
+**First set-up.** `npm run seed-site` shows what it would create. `npm run seed-site -- --apply` creates the draft from the approved details and imports the logo and poster; add `--publish` to publish it as well. It never changes settings that already exist.
+
+## Registration form
+
+| Field | Rule |
+|---|---|
+| Name, Age, District, Area, Unit, Email | Unchanged |
+| Phone number | Unchanged (stored as `mobile`); part of the duplicate rule |
+| Place | New, separate from Area and Unit, same character rule. Required (`PLACE_REQUIRED` in `config/constants.js`). |
+| WhatsApp number | New. "Same as phone number" is ticked by default. Validated like the phone number, with the same country code. **Not** part of the duplicate rule. |
+| Gender | Asked only when an admin has entered the options (Page content, Registration). Until then it is not shown and not accepted. |
+| Accompanying children | Asked only when an admin has set the maximum number and the youngest and oldest age. The form then asks for the number and one age per child. |
+
+The note "Any accompanying adults must register separately." is always shown.
+
+**Form versions.** The new form sends `formVersion: 2`. A submission without `formVersion` comes from the original form (for example a page opened before a deploy) and is still accepted, with the original fields only. Any other version is refused with "Please reload the page".
+
+**WhatsApp recipient.** Messages and the pass go to the WhatsApp number when the registration has one, otherwise to the mobile number, as for every registration made before this change (`recipientOf` in `services/notifications.js`). Each message record stores the number used.
+
+**Children on the pass.** The confirmation message and the pass caption add "Accompanying children: N" when N is more than 0. New passes print Place and an "Accompanying children: N" band, and say "Valid for the holder and N accompanying children". Ages are never printed; admins see them on the registration page, staff see only the number. Passes issued before this change print exactly as before.
+
+**Older registrations** have no gender, place, WhatsApp number or children; the admin console shows "Not recorded". Nothing is back-filled.
+
+## Image storage
+
+`providers/assetStore.js` is the only code that knows where image files are. `ASSET_STORAGE` chooses:
+
+| Value | Where | Use when |
+|---|---|---|
+| `gridfs` | GridFS bucket `siteassets` in this app's MongoDB | The disk is not persistent (containers, most platforms) and the database has room. One `mongodump` backs up registrations and images together. |
+| `local` | Files in `ASSET_STORAGE_DIR` (default `server/.data/assets`) | A server with a persistent, backed-up disk and one app process |
+
+Development defaults to `gridfs`. **Production must set it explicitly**; the server refuses to start otherwise. Choose it once the hosting and the database quota are confirmed. Object storage (for example S3 or R2) would be a third implementation of the same `put`, `get` and `remove` functions, plus a CSP `img-src` entry.
+
+Upload checks (`services/assets.js`): admins only. JPEG or PNG, decided from the file's bytes; SVG, GIF, WebP and anything else are refused (WebP because the installed `canvas` cannot decode it). At most 5 MB and at least 200 px on each side. Dimensions are read from the header, and anything over 40 megapixels is refused before decoding. Every image is redrawn and re-encoded, which removes EXIF data such as the GPS position and applies the EXIF rotation; the long side is reduced to 1600 px. Alternative text is required.
+
+Files are stored under their SHA-256 and served from `/api/assets/<sha256>.<ext>` with a one-year immutable cache. Replacing an image keeps the library entry, so every place that uses it shows the new file; the old file is removed unless another entry uses the same file. An image that is used anywhere, in a draft or in the published copy, cannot be deleted. `npm run assets-cleanup` lists stored files without a library entry.
 
 ## Registration workflow
 
@@ -229,6 +302,16 @@ To change the wording, edit `server/src/services/templates.js`.
 
 ## Deployment
 
+Before deploying this version to an environment that already has registrations:
+
+1. Take a `mongodump` of that database and test a restore into a separate database. Record the counts by status and pass status. Keep a copy of the `.env`, including `PASS_SIGNING_SECRET`.
+2. Run `npm run check-indexes` against it (read-only). It must report "No existing index would be dropped". This release adds collections (`sitesettings`, `contentitems`, `assets`, and `siteassets.files` / `siteassets.chunks` with GridFS) and changes no existing index or document.
+3. Set `ASSET_STORAGE` (see [Image storage](#image-storage)).
+4. Deploy. Run `npm run seed-site` (dry run), then `npm run seed-site -- --apply`, review in the admin console, and publish.
+5. To roll back, redeploy the previous build. It ignores the new fields and collections.
+
+General set-up:
+
 1. Run Node.js 20+ on a host behind HTTPS, using nginx, Caddy, or a platform load balancer.
 2. Use a MongoDB database created for this application only.
 3. Build and start:
@@ -240,7 +323,7 @@ To change the wording, edit `server/src/services/templates.js`.
 4. Production `.env`: set `NODE_ENV=production`, `PUBLIC_BASE_URL=https://your-domain`, `TRUST_PROXY=1` and fresh secrets.
 5. Create the first admin with `npm run create-admin -- ...` on the server.
 6. **`canvas` system packages.** On Linux, `canvas` needs Cairo and Pango, and the pass needs fonts. On Debian or Ubuntu: `apt install libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libjpeg62-turbo libgif7 librsvg2-2 fonts-noto-core`. Add `fonts-noto-ui-indic` or similar if names may be written in Indic scripts. Prebuilt binaries cover Windows and macOS.
-7. Make sure the reverse proxy forwards `/api/passes/*` publicly, because DXing must reach it.
+7. Make sure the reverse proxy forwards `/api/passes/*` publicly, because DXing must reach it, and accepts request bodies up to 5 MB on `/api/admin/website/assets` (image uploads).
 
 ## Tests
 
@@ -258,6 +341,10 @@ The tests run against an in-memory MongoDB and need no setup. They use a local f
 | Passes | Signed link works; tampered, expired and unsigned links get 404. Admin-only image route. Generate refused when a pass exists. Resend cooldown. QR verify rejects forgeries. |
 | DXing | Payload shape. Rejected response, HTTP 503 and unreachable host are all recorded, not thrown. Pass kept on failure. Retry. A second retry is refused. |
 | Listing | Search by name, mobile and email. Regex characters treated literally. Every filter, every sort, pagination, filter options, stats. |
+| Website (`content.test.js`) | 401 and 403 for signed-out users and staff, CSRF header, validation (safe links, form rules), drafts not public, preview, publish, discard, version conflicts, hidden-section text not sent, registration switch, event details reaching messages and passes, programme, speakers and FAQs (publish, unpublish, order, delete), persistence across a restart |
+| Images (`content.test.js`) | Type from the bytes (SVG, GIF and text sent as an image refused), size limits, a header claiming a huge image, EXIF and GPS removed, rotation, replace, in-use delete refused, delete, both storage backends |
+| Form version 2 (`registration-v2.test.js`) | Place, WhatsApp (same, different, invalid), gender and children with and without admin rules, duplicate rule unchanged, idempotency, recipient of the acknowledgement, confirmation, pass and retry, children on messages and pass (never ages), pass size, gate check, ages for admins only, search |
+| Older records (`legacy-records.test.js`) | Registrations and passes inserted exactly as the original code wrote them: "not recorded" fields, filters, original pass size, gate check, resend and confirm to the mobile number, original message wording, stored documents not rewritten |
 
 A browser check was also run in headless Chrome at 390 px and 1366 px wide. It covered the form, invalid names and mobile numbers, the district suggestions, login, search and filters, Confirm Registration → pass, sorting, logout, and checked that no page overflows horizontally.
 
@@ -265,8 +352,10 @@ A browser check was also run in headless Chrome at 390 px and 1366 px wide. It c
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `/api/public/config` | none | Event name, date, venue; whether registration is open; district list; country codes |
-| POST | `/api/public/registrations` | none | Submit `name, age, mobile (digits only), countryCode (optional, default DEFAULT_COUNTRY_CODE), email, district, area, unit` (optional `Idempotency-Key` header) |
+| GET | `/api/public/config` | none | Event name, date, venue; whether registration is open; district list; country codes; form version, gender options and children limits |
+| GET | `/api/public/site` | none | Published website content (404 until the first publish) |
+| GET | `/api/assets/:sha256.:ext` | none | Website image |
+| POST | `/api/public/registrations` | none | Submit `name, age, mobile (digits only), countryCode (optional, default DEFAULT_COUNTRY_CODE), email, district, area, unit`; form version 2 adds `formVersion: 2, place, whatsappSameAsMobile, whatsapp, gender, childrenCount, childAges` (optional `Idempotency-Key` header) |
 | GET | `/api/passes/:passId/image?v&exp&sig` | signed link | Pass PNG for DXing |
 | POST | `/api/auth/login` · `/logout` · GET `/me` | | Session |
 | GET | `/api/admin/registrations` | view | `search, status, passStatus, district, area, unit, from, to, sort(createdAt,name,age,district,status), dir, page, limit≤100` |
@@ -278,5 +367,14 @@ A browser check was also run in headless Chrome at 390 px and 1366 px wide. It c
 | POST | `/api/admin/registrations/:id/notifications/:nid/retry` | send | Retry a failed message |
 | GET | `/api/admin/stats` · `/api/admin/filters` | view | Counts; filter options (district list, areas and units from submitted data) |
 | POST | `/api/admin/passes/verify` | gate | Check a scanned QR code or a typed pass ID |
+| GET, PUT | `/api/admin/website/settings` | content | Page settings (draft, published, version); save the draft with `{draft, version}` |
+| POST | `/api/admin/website/settings/publish`, `/discard` | content | `{version}` |
+| GET | `/api/admin/website/preview` | content | The website with every draft |
+| GET, POST | `/api/admin/website/items/:kind` | content | `kind` is programme, speaker, announcement, faq or gallery. Create with `{data}` |
+| PUT, DELETE | `/api/admin/website/items/:kind/:id` | content | Update with `{data, version}`; delete |
+| POST | `/api/admin/website/items/:kind/:id/publish`, `/unpublish`, `/move` | content | `{version}`; move with `{direction: "up" or "down"}` |
+| GET, POST | `/api/admin/website/assets` | content | Library; upload (the image as the raw body, `?alt=&caption=`, `X-File-Name`) |
+| PUT, DELETE | `/api/admin/website/assets/:id` | content | Alternative text and caption; delete (409 while in use) |
+| POST | `/api/admin/website/assets/:id/replace` | content | New file for the same image |
 
 Action endpoints return the updated registration plus `messages: [{ok, error, template}]`, so the admin panel can show exactly which WhatsApp message failed and why.
