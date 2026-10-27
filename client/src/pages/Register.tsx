@@ -5,7 +5,7 @@ import { Camera, Check, Copy, Download, Share2, UserRound } from 'lucide-react';
 import '../site.css';
 import { api, ApiError, errorMessage, newIdempotencyKey, uploadFile } from '../lib/api';
 import type { PublicConfig, PublicPage, PublicSite, SubmissionResult } from '../lib/types';
-import { FALLBACK_SITE, plain } from '../lib/site';
+import { FALLBACK_SITE, plain, socialLinks } from '../lib/site';
 import { COMMON_COUNTRIES, COUNTRIES, findCountry, lengthText } from '../lib/phone';
 import {
   FIELD_ORDER,
@@ -346,6 +346,7 @@ export default function Register() {
   return (
     <div className="site">
       <SiteHeader
+        socials={socialLinks(page)}
         actions={
           <Link to="/" className="hdr-back">
             <span aria-hidden="true">←</span> Conference home

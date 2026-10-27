@@ -36,8 +36,9 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['"Hanken Grotesk Variable"', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Noto Sans', 'sans-serif'],
-        serif: ['"Instrument Serif"', '"Iowan Old Style"', 'Georgia', 'serif'],
+        // Outfit everywhere; `serif` is kept as an alias so display headings need no class changes.
+        sans: ['"Outfit Variable"', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Noto Sans', 'sans-serif'],
+        serif: ['"Outfit Variable"', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Noto Sans', 'sans-serif'],
       },
       boxShadow: {
         soft: '0 1px 2px rgb(60 10 18 / 0.04), 0 4px 16px -4px rgb(60 10 18 / 0.08)',

@@ -1,6 +1,6 @@
 // Helpers for the public conference website.
 import { Fragment } from 'react';
-import type { PublicSite } from './types';
+import type { PublicPage, PublicSite } from './types';
 
 /**
  * Renders `*word*` as emphasis. Content is plain text: it is split into
@@ -63,6 +63,22 @@ export function timeRange(start: string, end: string) {
   return end ? `${formatTime(start)} – ${formatTime(end)}` : formatTime(start);
 }
 
+/** GIO Keralam's accounts, used wherever the website settings leave them empty. */
+const GIO_SOCIAL = {
+  facebook: 'https://www.facebook.com/giokerala',
+  instagram: 'https://www.instagram.com/gio_keralam/',
+  youtube: 'https://www.youtube.com/@giokerala5691/',
+};
+
+/** Social links shown under the GIO Keralam logo in the header and footer. */
+export function socialLinks(p: Pick<PublicPage, 'facebook' | 'instagram' | 'youtube'>): Array<[string, string]> {
+  return [
+    ['Facebook', safeHref(p.facebook) ?? GIO_SOCIAL.facebook],
+    ['Instagram', safeHref(p.instagram) ?? GIO_SOCIAL.instagram],
+    ['YouTube', safeHref(p.youtube) ?? GIO_SOCIAL.youtube],
+  ];
+}
+
 /**
  * Shown when the website content cannot be loaded (server unreachable, or
  * nothing published yet): the approved conference details and the logo and
@@ -85,18 +101,18 @@ export const FALLBACK_SITE: PublicSite = {
     themeTitle: 'Being, *Becoming,* Belonging',
     themeSubtitle: 'Reimagining the Self, Space and Society',
     themeBody: '',
-    aboutHeading: 'A meaningful congregation for *empowered women*',
+    aboutHeading: 'About the conference',
     aboutBody:
       'The International Conference on Women, organised by GIO Keralam, is a platform to reflect, learn and build together, exploring the evolving roles, challenges and opportunities for women in contemporary society.',
     aboutImage: null,
     logo: { id: 'fallback-logo', url: '/brand/gio-logo-maroon.png', alt: 'GIO Keralam', caption: '', width: 600, height: 441 },
     poster: {
       id: 'fallback-poster',
-      url: '/brand/poster-1.jpg',
+      url: '/brand/poster.jpg',
       alt: 'Official poster of the International Conference on Women, 15 November 2026, Ernakulam',
       caption: '',
-      width: 720,
-      height: 960,
+      width: 1200,
+      height: 1600,
     },
     posterCaption: 'Official poster',
     posterTag: '15 Nov 2026',
@@ -111,9 +127,7 @@ export const FALLBACK_SITE: PublicSite = {
     phone: '',
     whatsapp: '',
     email: '',
-    facebook: '',
-    instagram: '',
-    youtube: '',
+    ...GIO_SOCIAL,
     closingText: '15 November 2026, *Ernakulam*',
     footerText: 'International Conference on Women · GIO Keralam',
     show: { updates: false, theme: true, about: true, programme: true, speakers: false, gallery: false, faq: false, venue: true, contact: false },

@@ -2,16 +2,15 @@
 // settings (GET /api/public/site). Admins can open /?preview=1 to see drafts
 // and hidden sections, outlined. Optional sections stay hidden until they
 // have published content.
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import type { ReactNode, RefObject } from 'react';
+import { Fragment, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { BookOpen, CalendarDays, ChevronLeft, ChevronRight, Download, FileText, MapPin, Network, Play, QrCode, UserRound, Users } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { ArrowRight, BookOpen, CalendarDays, FileText, MapPin, MessageSquareText, UserRound } from 'lucide-react';
 import '../site.css';
 import { api, ApiError } from '../lib/api';
 import type { ItemStatus, PublicSite, SectionKey } from '../lib/types';
-import { FALLBACK_SITE, Paras, Rich, initialsOf, plain, safeHref, timeRange } from '../lib/site';
-import { BackToTop, LeafMark, SiteHeader } from '../components/SiteChrome';
+import { FALLBACK_SITE, Paras, Rich, initialsOf, plain, safeHref, socialLinks, timeRange } from '../lib/site';
+import { BackToTop, SiteHeader, SocialLinks } from '../components/SiteChrome';
 
 type State = { site: PublicSite; source: 'live' | 'fallback' | 'preview'; previewError?: string };
 
@@ -43,10 +42,10 @@ function useSite(preview: boolean) {
 }
 
 /**
- * Reveals content as it scrolls into view: `.rv` fades up, `.rv-kids` staggers
- * its children and `.rv-art` slides its background art in. Only elements
- * still below the fold are hidden first, and nothing is hidden with reduced
- * motion or without IntersectionObserver, so content is never held back.
+ * Reveals content as it scrolls into view: `.rv` fades up and `.rv-kids`
+ * staggers its children. Only elements still below the fold are hidden
+ * first, and nothing is hidden with reduced motion or without
+ * IntersectionObserver, so content is never held back.
  */
 function useReveal(ready: boolean) {
   useEffect(() => {
@@ -61,7 +60,7 @@ function useReveal(ready: boolean) {
         }),
       { rootMargin: '0px 0px -6% 0px', threshold: 0.06 }
     );
-    document.querySelectorAll<HTMLElement>('.site .rv, .site .rv-kids, .site .rv-art').forEach((el) => {
+    document.querySelectorAll<HTMLElement>('.site .rv, .site .rv-kids').forEach((el) => {
       if (el.getBoundingClientRect().top > window.innerHeight) {
         el.classList.add('rv-on');
         io.observe(el);
@@ -71,52 +70,36 @@ function useReveal(ready: boolean) {
   }, [ready]);
 }
 
-/** True once the element has scrolled above the viewport. */
-function usePassed(ref: RefObject<HTMLElement>, ready: boolean) {
-  const [passed, setPassed] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!ready || !el || !('IntersectionObserver' in window)) return undefined;
-    const io = new IntersectionObserver(([e]) => setPassed(!e.isIntersecting && e.boundingClientRect.top < 0));
-    io.observe(el);
-    return () => io.disconnect();
-  }, [ref, ready]);
-  return passed;
-}
-
 const DraftTag = ({ status, label }: { status?: ItemStatus; label?: string }) =>
   label || (status && status !== 'published') ? <span className="draft-tag">{label ?? (status === 'changed' ? 'Unpublished changes' : 'Draft')}</span> : null;
 
 const draftCls = (status?: ItemStatus) => (status && status !== 'published' ? 'is-draft' : undefined);
 
-/** Leaf artwork cut from the approved design, at the edges of a band. */
-function Art({ left, right, lazy = true }: { left?: string; right?: string; lazy?: boolean }) {
-  const load = lazy ? ('lazy' as const) : undefined;
-  return (
-    <>
-      {left && <img className="art art-l" src={`/brand/bg/${left}.webp`} alt="" aria-hidden="true" loading={load} decoding="async" />}
-      {right && <img className="art art-r" src={`/brand/bg/${right}.webp`} alt="" aria-hidden="true" loading={load} decoding="async" />}
-    </>
-  );
-}
+/** A gold leaf sprig; each placement (`at`) is set in site.css. */
+const Leaf = ({ at }: { at: string }) => <img className={`leaf ${at}`} src="/brand/bg/leaves-gold.svg" width={320} height={520} alt="" aria-hidden="true" decoding="async" />;
 
-/** Light band with the section name in a left column. */
-function Section({ id, label, hidden, tag, art, children }: { id: string; label: string; hidden?: boolean; tag?: string; art?: boolean; children: ReactNode }) {
+/** White band with a centred heading over a short red rule. */
+function Section({ id, title, hidden, tag, leaves, children }: { id: string; title: ReactNode; hidden?: boolean; tag?: string; leaves?: boolean; children: ReactNode }) {
   return (
-    <section className={`sec${art ? ' rv-art' : ''}${hidden ? ' is-draft' : ''}`} id={id} aria-labelledby={`${id}-label`}>
-      {art && <Art left="theme-left" right="theme-right" />}
-      <div className="wrap sec-grid">
-        <p className="sec-label" id={`${id}-label`}>
-          {label}
+    <section className={`sec${hidden ? ' is-draft' : ''}`} id={id} aria-labelledby={`${id}-title`}>
+      {leaves && (
+        <>
+          <Leaf at="lv-l" />
+          <Leaf at="lv-r" />
+        </>
+      )}
+      <div className="wrap sec-in">
+        <h2 className="sec-title rv" id={`${id}-title`}>
+          {title}
           {tag && <span className="draft-tag">{tag}</span>}
-        </p>
-        <div className="rv">{children}</div>
+        </h2>
+        {children}
       </div>
     </section>
   );
 }
 
-function RegisterButton({ open, className = '', large }: { open: boolean; className?: string; large?: boolean }) {
+function RegisterButton({ open, className = '' }: { open: boolean; className?: string }) {
   if (!open) {
     return (
       <span className={`btn is-closed ${className}`} aria-disabled="true">
@@ -125,8 +108,8 @@ function RegisterButton({ open, className = '', large }: { open: boolean; classN
     );
   }
   return (
-    <Link to="/register" className={`btn btn-reg ${large ? 'lg' : ''} ${className}`}>
-      Register now <span className="arr" aria-hidden="true">→</span>
+    <Link to="/register" className={`btn btn-reg ${className}`}>
+      Register Now <ArrowRight className="arr" aria-hidden="true" strokeWidth={2} />
     </Link>
   );
 }
@@ -135,7 +118,7 @@ function LoadingPage() {
   return (
     <div className="site" aria-busy="true">
       <div className="band-hdr">
-        <div className="wrap band-hdr-in" style={{ minHeight: 96 }} />
+        <div className="wrap band-hdr-in" style={{ minHeight: 140 }} />
       </div>
       <div className="hdr">
         <div className="wrap hdr-in">
@@ -156,150 +139,105 @@ function LoadingPage() {
   );
 }
 
-/** "Being, Becoming, Belonging" becomes separate words; anything else stays one line. */
-function themeWords(title: string) {
-  const parts = plain(title)
-    .split(',')
-    .map((w) => w.trim())
-    .filter(Boolean);
-  return parts.length >= 2 && parts.length <= 4 && parts.every((w) => w.split(/\s+/).length <= 2) ? parts : null;
-}
-
 /** "15 November 2026" -> "15" over "November 2026"; other formats stay whole. */
 function splitDate(text: string) {
   const m = /^(\d{1,2}(?:\s*[–-]\s*\d{1,2})?)\s+(.+)$/.exec(text.trim());
   return m ? { big: m[1], rest: m[2] } : { big: text, rest: '' };
 }
 
-const POSTERS = [
-  { src: '/brand/poster-1.jpg', alt: 'Conference poster with an illustration of women: International Conference on Women, 15 November 2026, Ernakulam' },
-  { src: '/brand/poster-2.jpg', alt: 'Conference poster: International Conference on Women, 15 November 2026, Ernakulam' },
-];
-
-const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
 /**
- * Hero poster carousel. Slides sit in a scroll-snap track, so touch swipe
- * works natively and the arrows and dots just scroll it. It advances every
- * 6 seconds until a visitor uses it, pauses on hover or focus, and never
- * moves on its own with reduced motion.
+ * The page title with its `*emphasis*` set like the conference logo: on its
+ * own line, larger, in red, with the first "o" drawn as the leaf.
  */
-function PosterSlider({ posters }: { posters: Array<{ src: string; alt: string }> }) {
-  const track = useRef<HTMLDivElement>(null);
-  const [index, setIndex] = useState(0);
-  const [auto, setAuto] = useState(true);
-  const [paused, setPaused] = useState(false);
-  const trackId = useId();
-  const n = posters.length;
-
-  const go = useCallback(
-    (i: number) => {
-      const el = track.current;
-      if (el) el.scrollTo({ left: ((i + n) % n) * el.clientWidth, behavior: reducedMotion() ? 'auto' : 'smooth' });
-    },
-    [n]
-  );
-  const choose = (i: number) => {
-    setAuto(false);
-    go(i);
-  };
-
-  useEffect(() => {
-    if (!auto || paused || n < 2 || reducedMotion()) return undefined;
-    const t = window.setTimeout(() => go(index + 1), 6000);
-    return () => window.clearTimeout(t);
-  }, [auto, paused, index, n, go]);
-
+function HeroTitle({ text }: { text: string }) {
+  const parts = String(text || '').split('*');
   return (
-    <div
-      className="poster"
-      role="region"
-      aria-roledescription="carousel"
-      aria-label="Conference posters"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-      onFocus={() => setPaused(true)}
-      onBlur={() => setPaused(false)}
-    >
-      <div className="poster-stage">
-        <div
-          className="poster-track"
-          id={trackId}
-          ref={track}
-          onScroll={(e) => setIndex(Math.round(e.currentTarget.scrollLeft / e.currentTarget.clientWidth))}
-          onPointerDown={() => setAuto(false)}
-        >
-          {posters.map((poster, i) => (
-            <div key={poster.src} className={`poster-slide${i === index ? ' on' : ''}`} role="group" aria-roledescription="slide" aria-label={`${i + 1} of ${n}`}>
-              <img src={poster.src} alt={poster.alt} width={720} height={960} decoding="async" draggable={false} />
-            </div>
-          ))}
-        </div>
-        {n > 1 && (
-          <>
-            <button type="button" className="poster-arrow prev" aria-controls={trackId} aria-label="Previous poster" onClick={() => choose(index - 1)}>
-              <ChevronLeft aria-hidden="true" strokeWidth={1.75} />
-            </button>
-            <button type="button" className="poster-arrow next" aria-controls={trackId} aria-label="Next poster" onClick={() => choose(index + 1)}>
-              <ChevronRight aria-hidden="true" strokeWidth={1.75} />
-            </button>
-          </>
-        )}
+    <>
+      {parts.map((part, i) => {
+        if (i % 2 === 0 || i === parts.length - 1) return <Fragment key={i}>{part}</Fragment>;
+        const o = part.indexOf('o');
+        return (
+          <em key={i}>
+            {o < 0 ? (
+              part
+            ) : (
+              <>
+                <span className="sr-only">{part}</span>
+                <span aria-hidden="true">
+                  {part.slice(0, o)}
+                  <img className="leaf-o" src="/brand/icw-o.webp" width={230} height={202} alt="" />
+                  {part.slice(o + 1)}
+                </span>
+              </>
+            )}
+          </em>
+        );
+      })}
+    </>
+  );
+}
+
+/** Highlights running across a dark band. The first copy is read out; the repeats that keep it looping are hidden. */
+function Ticker({ items }: { items: string[] }) {
+  return (
+    <div className="ticker" role="region" aria-label="Highlights">
+      <div className="tk-track">
+        {[0, 1, 2, 3, 4, 5].map((n) => (
+          <ul key={n} className="tk-group" aria-hidden={n > 0 || undefined}>
+            {items.map((t, i) => (
+              <li key={i}>{t}</li>
+            ))}
+          </ul>
+        ))}
       </div>
-      {n > 1 && (
-        <div className="poster-dots">
-          {posters.map((poster, i) => (
-            <button
-              key={poster.src}
-              type="button"
-              className={i === index ? 'on' : undefined}
-              aria-controls={trackId}
-              aria-label={`Show poster ${i + 1}`}
-              aria-current={i === index || undefined}
-              onClick={() => choose(i)}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 }
 
-const PILLARS: Array<[LucideIcon, string]> = [
-  [Users, 'Thoughtful Sessions'],
-  [UserRound, 'Inspiring Speakers'],
-  [BookOpen, 'Meaningful Dialogues'],
-  [Network, 'Stronger Networks'],
-];
-
-const STEPS: Array<[LucideIcon, string, string]> = [
-  [FileText, 'Fill in the form', 'Add any children coming with you. You get a registration number at once.'],
-  [QrCode, 'Entry pass', 'Your pass with a QR code is ready as soon as you submit.'],
-  [Download, 'Download or share', 'Keep the pass on your phone or print it for the entrance.'],
-];
-
-const SOCIAL_ICONS: Record<string, ReactNode> = {
-  Facebook: <path d="M14.5 7.5h-1.6c-1.1 0-1.9.8-1.9 1.9V21M8.5 12.5h6" />,
-  Instagram: (
-    <>
-      <rect x="4" y="4" width="16" height="16" rx="5" />
-      <circle cx="12" cy="12" r="3.6" />
-      <circle cx="16.8" cy="7.2" r="0.6" fill="currentColor" />
-    </>
-  ),
-  YouTube: (
-    <>
-      <rect x="3" y="6" width="18" height="12" rx="3.5" />
-      <path d="M10.5 9.6v4.8l4-2.4z" fill="currentColor" />
-    </>
-  ),
+/** The official poster, with a larger copy for wide and high-density screens. */
+const POSTER = {
+  src: '/brand/poster-2.jpg',
+  srcSet: '/brand/poster-2.jpg 720w, /brand/poster.jpg 1200w',
+  alt: 'Conference poster: International Conference on Women, 15 November 2026, Ernakulam. Being, Becoming, Belonging: Reimagining the Self, Space and Society.',
 };
+
+// Until a brochure is supplied, "View Brochure" opens the full-size poster.
+const BROCHURE_URL = '/brand/poster.jpg';
+
+const ico = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const;
+
+const STATS: Array<{ icon: ReactNode; value?: string; label: string }> = [
+  {
+    icon: (
+      <svg {...ico}>
+        <circle cx="12" cy="7.2" r="2.6" />
+        <circle cx="5.3" cy="8.6" r="2.1" />
+        <circle cx="18.7" cy="8.6" r="2.1" />
+        <path d="M7.6 19v-1.3a4.4 4.4 0 0 1 8.8 0V19M1.8 18.4v-.8a3.5 3.5 0 0 1 4.9-3.2M22.2 18.4v-.8a3.5 3.5 0 0 0-4.9-3.2" />
+      </svg>
+    ),
+    value: '350+',
+    label: 'Attendees',
+  },
+  { icon: <UserRound strokeWidth={1.6} aria-hidden="true" />, value: '15+', label: 'Guests' },
+  { icon: <BookOpen strokeWidth={1.6} aria-hidden="true" />, label: 'Thoughtful Sessions' },
+  { icon: <MessageSquareText strokeWidth={1.6} aria-hidden="true" />, label: 'Meaningful Dialogues' },
+  {
+    icon: (
+      <svg {...ico}>
+        <circle cx="12" cy="5.4" r="2.5" />
+        <circle cx="5.6" cy="17.8" r="2.5" />
+        <circle cx="18.4" cy="17.8" r="2.5" />
+        <path d="M12 7.9v4.3l-4.6 3.8M12 12.2l4.6 3.8" />
+      </svg>
+    ),
+    label: 'Stronger Networks',
+  },
+];
 
 export default function Landing() {
   const [params] = useSearchParams();
   const state = useSite(params.get('preview') === '1');
-  const heroCta = useRef<HTMLDivElement>(null);
-  const passedHero = usePassed(heroCta, Boolean(state));
   useReveal(Boolean(state));
 
   useEffect(() => {
@@ -316,11 +254,10 @@ export default function Landing() {
   const visible = (k: SectionKey) => p.show[k] || pv;
   const hiddenTag = (k: SectionKey) => (pv && !p.show[k] ? 'Hidden' : undefined);
   const pinned = site.announcements.find((a) => a.pinned && (a.status ?? 'published') !== 'draft');
-  const words = themeWords(p.themeTitle);
   const themeLine = plain(p.themeTitle) || p.themeShort;
-  const showTheme = visible('theme') && Boolean(p.themeTitle);
-  const showAbout = visible('about') && Boolean(p.aboutBody || p.aboutImage || pv);
-  const showVenue = visible('venue') || visible('contact');
+  const showTheme = visible('theme') && Boolean(themeLine);
+  const showAbout = visible('about');
+  const showContact = visible('contact');
 
   const nav: Array<[string, string]> = [['s-home', 'Home']];
   if (showTheme) nav.push(['s-theme', 'Theme']);
@@ -328,12 +265,21 @@ export default function Landing() {
   if (visible('programme')) nav.push(['s-programme', 'Programme']);
   if (visible('speakers') && site.speakers.length) nav.push(['s-speakers', 'Speakers']);
   nav.push(['s-reg', 'Registration']);
-  if (showVenue) nav.push(['s-contact', 'Venue']);
+  if (visible('venue')) nav.push(['s-venue', 'Venue']);
   if (visible('faq') && site.faqs.length) nav.push(['s-faq', 'FAQ']);
+  // Without a contact section, Contact goes to the footer and its social links.
+  nav.push(['s-contact', 'Contact']);
 
   const date = p.dateText ? splitDate(p.dateText) : null;
   const place = p.location || p.venue;
   const placeSub = p.location ? p.venue || 'Kerala, India' : '';
+
+  const ticker = [
+    pinned && visible('updates') ? pinned.title : '',
+    p.dateText ? `${plain(p.title)} is happening on ${p.dateText}` : plain(p.title),
+    open ? 'Registration Open' : 'Registration Closed',
+    visible('theme') ? themeLine : '',
+  ].filter(Boolean);
 
   const contacts = [
     ['Phone', p.phone, p.phone ? `tel:${p.phone.replace(/[^\d+]/g, '')}` : null],
@@ -343,7 +289,7 @@ export default function Landing() {
     ['Instagram', p.instagram && 'Instagram', safeHref(p.instagram)],
     ['YouTube', p.youtube && 'YouTube', safeHref(p.youtube)],
   ].filter((c): c is [string, string, string] => Boolean(c[1] && c[2]));
-  const socials = contacts.filter(([label]) => label in SOCIAL_ICONS);
+  const socials = socialLinks(p);
   const map = safeHref(p.mapUrl);
 
   return (
@@ -358,44 +304,24 @@ export default function Landing() {
       )}
       {state.previewError && <div className="pvbar">{state.previewError} Showing the published website.</div>}
 
-      {pinned && visible('updates') && (
-        <div className={`topbar ${draftCls(pinned.status) ?? ''}`}>
-          <div className="wrap">
-            <b>{pinned.title}</b>
-            <AnnouncementLink text={pinned.linkText} url={pinned.linkUrl} open={open} />
-          </div>
-        </div>
-      )}
-
-      <SiteHeader
-        nav={nav}
-        actions={
-          open && (
-            <Link to="/register" className="btn btn-reg hdr-reg">
-              Register now <span className="arr" aria-hidden="true">→</span>
-            </Link>
-          )
-        }
-        menuAction={open && <RegisterButton open large />}
-      />
+      <SiteHeader nav={nav} socials={socials} actions={open && <RegisterButton open className="hdr-reg" />} menuAction={open && <RegisterButton open />} />
 
       <main id="main">
         <section className="hero" id="s-home" aria-labelledby="hero-title">
-          <Art left="hero-left" lazy={false} />
+          <Leaf at="lv-hero-l" />
+          <Leaf at="lv-hero-r" />
           <div className="wrap hero-grid">
-            <img className="art art-line" src="/brand/bg/women-line.webp" width={1200} height={1152} alt="" aria-hidden="true" decoding="async" />
             <div className="hero-copy enter">
               {p.presenter && <p className="eyebrow">{p.presenter}</p>}
               <h1 id="hero-title">
-                <Rich text={p.title} />
+                <HeroTitle text={p.title} />
               </h1>
-              {visible('theme') && themeLine && (
-                <p className="hero-theme">
-                  <span className="t">{themeLine}</span>
-                  {p.themeSubtitle && <span className="s">{p.themeSubtitle}</span>}
-                </p>
+              {showTheme && (
+                <div className={`hero-theme${!p.show.theme ? ' is-draft' : ''}`} id="s-theme">
+                  <img src="/brand/bbb-logo-dark.webp" width={204} height={220} alt={[themeLine, p.themeSubtitle].filter(Boolean).join(': ')} />
+                  <DraftTag label={hiddenTag('theme')} />
+                </div>
               )}
-              {p.intro && <p className="lede">{p.intro}</p>}
               {(date || place) && (
                 <dl className="facts">
                   {date && (
@@ -417,10 +343,7 @@ export default function Landing() {
                       <dt className="sr-only">Location</dt>
                       <dd>
                         <span className="fic" aria-hidden="true">
-                          <svg viewBox="0 0 24 24">
-                            <path d="M12 22s-7.5-6.4-7.5-12.2a7.5 7.5 0 0115 0C19.5 15.6 12 22 12 22z" fill="currentColor" />
-                            <circle cx="12" cy="9.8" r="2.7" fill="#f6e4e1" />
-                          </svg>
+                          <MapPin strokeWidth={1.6} />
                         </span>
                         <span>
                           <b>{place}</b>
@@ -431,28 +354,75 @@ export default function Landing() {
                   )}
                 </dl>
               )}
-              <div className="hero-cta" ref={heroCta}>
-                <RegisterButton open={open} large />
-                {showTheme && (
-                  <a className="explore" href="#s-theme">
-                    <span className="explore-ic" aria-hidden="true">
-                      <Play fill="currentColor" strokeWidth={1.5} />
-                    </span>
-                    Explore the theme
-                  </a>
-                )}
+            </div>
+            <figure className="poster">
+              <img src={POSTER.src} srcSet={POSTER.srcSet} sizes="(min-width: 960px) 34vw, 100vw" alt={POSTER.alt} width={720} height={960} decoding="async" />
+              {open && <RegisterButton open className="poster-reg" />}
+            </figure>
+          </div>
+        </section>
+
+        <Ticker items={ticker} />
+
+        {showAbout && (
+          <Section id="s-about" title={<Rich text={p.aboutHeading || 'About the conference'} />} hidden={!p.show.about} tag={hiddenTag('about')} leaves>
+            <div className="body rv">
+              <Paras text={p.aboutBody || FALLBACK_SITE.page.aboutBody} />
+            </div>
+            {p.aboutImage && (
+              <figure className="about-img rv">
+                <img src={p.aboutImage.url} alt={p.aboutImage.alt} width={p.aboutImage.width} height={p.aboutImage.height} loading="lazy" />
+                {p.aboutImage.caption && <figcaption>{p.aboutImage.caption}</figcaption>}
+              </figure>
+            )}
+            <ul className="stats rv-kids">
+              {STATS.map(({ icon, value, label }) => (
+                <li key={label}>
+                  <span className="st-ic">{icon}</span>
+                  <p className="st-t">
+                    {value ? (
+                      <>
+                        <b className="v">{value}</b> <span>{label}</span>
+                      </>
+                    ) : (
+                      label.split(' ').map((w, i) => (
+                        <Fragment key={w}>
+                          {i > 0 && ' '}
+                          <b>{w}</b>
+                        </Fragment>
+                      ))
+                    )}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
+        <section className="cta-sec" id="s-reg" aria-labelledby="s-reg-title">
+          <div className="wrap-w">
+            <div className="cta rv">
+              <Leaf at="lv-cta-l" />
+              <Leaf at="lv-cta-r" />
+              <div className="cta-copy">
+                <h2 id="s-reg-title">
+                  Witness <em>Herstory</em>. Live.
+                </h2>
+                <p>Be part of a global conversation that matters.</p>
+              </div>
+              <div className="cta-actions">
+                <RegisterButton open={open} />
+                <a className="btn line" href={BROCHURE_URL} target="_blank" rel="noopener noreferrer">
+                  <FileText aria-hidden="true" strokeWidth={1.6} /> View Brochure
+                </a>
               </div>
             </div>
-            <PosterSlider posters={POSTERS} />
           </div>
         </section>
 
         {visible('updates') && site.announcements.length > 0 && (
-          <Section id="s-updates" label="Announcements" hidden={!p.show.updates} tag={hiddenTag('updates')}>
-            <h2>
-              <Rich text={p.updatesHeading || 'Latest updates'} />
-            </h2>
-            <div className="upd">
+          <Section id="s-updates" title={<Rich text={p.updatesHeading || 'Latest updates'} />} hidden={!p.show.updates} tag={hiddenTag('updates')}>
+            <div className="upd sec-body rv">
               {site.announcements.map((a) => (
                 <article key={a.id} className={draftCls(a.status)}>
                   <h3>
@@ -467,86 +437,10 @@ export default function Landing() {
           </Section>
         )}
 
-        {showTheme && (
-          <section className={`band band-theme rv-art${!p.show.theme ? ' is-draft' : ''}`} id="s-theme" aria-labelledby="s-theme-label">
-            <Art left="theme-left" right="theme-right" />
-            <div className="wrap band-in">
-              <p className="kicker" id="s-theme-label">
-                The theme
-                <DraftTag label={hiddenTag('theme')} />
-              </p>
-              {words ? (
-                <ol className="words rv-kids" aria-label={themeLine}>
-                  {words.map((w) => (
-                    <li key={w}>
-                      <LeafMark />
-                      <span className="w">{w}</span>
-                    </li>
-                  ))}
-                </ol>
-              ) : (
-                <p className="quote rv">
-                  <Rich text={p.themeTitle} />
-                </p>
-              )}
-              {p.themeSubtitle && <p className="quote-sub rv">{p.themeSubtitle}</p>}
-              {p.themeBody && (
-                <div className="body rv">
-                  <Paras text={p.themeBody} />
-                </div>
-              )}
-            </div>
-          </section>
-        )}
-
-        {showAbout && (
-          <section className={`band band-wine rv-art${!p.show.about || !p.aboutBody ? ' is-draft' : ''}`} id="s-about" aria-labelledby="s-about-title">
-            <Art left="about-left" right="about-right" />
-            <div className="wrap about-grid">
-              <div className="rv">
-                <p className="kicker kicker-2">
-                  <span>About</span>
-                  <span>the conference</span>
-                  <DraftTag label={hiddenTag('about') ?? (pv && !p.aboutBody ? 'Empty' : undefined)} />
-                </p>
-                <h2 id="s-about-title">
-                  <Rich text={p.aboutHeading || 'About the conference'} />
-                </h2>
-              </div>
-              <div>
-                {p.aboutBody && (
-                  <div className="body about-body rv">
-                    <Paras text={p.aboutBody} />
-                  </div>
-                )}
-                {p.aboutImage && (
-                  <figure className="about-img rv">
-                    <img src={p.aboutImage.url} alt={p.aboutImage.alt} width={p.aboutImage.width} height={p.aboutImage.height} loading="lazy" />
-                    {p.aboutImage.caption && <figcaption>{p.aboutImage.caption}</figcaption>}
-                  </figure>
-                )}
-                <ul className="pillars rv-kids">
-                  {PILLARS.map(([Icon, label]) => (
-                    <li key={label}>
-                      <span className="ic" aria-hidden="true">
-                        <Icon strokeWidth={1.5} />
-                      </span>
-                      {label}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </section>
-        )}
-
         {visible('programme') && (
-          <Section id="s-programme" label="Programme" hidden={!p.show.programme} tag={hiddenTag('programme')} art>
+          <Section id="s-programme" title={<Rich text={p.programmeHeading || 'Programme'} />} hidden={!p.show.programme} tag={hiddenTag('programme')} leaves>
             {site.programme.length ? (
-              <>
-                <h2>
-                  <Rich text={p.programmeHeading || 'Programme'} />
-                </h2>
+              <div className="sec-body rv">
                 {p.programmeIntro && (
                   <div className="body">
                     <Paras text={p.programmeIntro} />
@@ -571,32 +465,24 @@ export default function Landing() {
                     );
                   })}
                 </ol>
-              </>
+              </div>
             ) : (
-              <div className="soon">
-                <span className="soon-ic" aria-hidden="true">
-                  <CalendarDays strokeWidth={1.5} />
+              <div className="note rv">
+                <span className="note-ic" aria-hidden="true">
+                  <CalendarDays strokeWidth={1.6} />
                 </span>
                 <div>
-                  <p className="soon-t">Programme will be announced soon.</p>
-                  <p className="soon-s">{p.programmeIntro || 'Details about sessions, speakers and schedule will be updated here.'}</p>
+                  <h3>Programme will be announced soon.</h3>
+                  <p>{p.programmeIntro || 'Details about sessions, speakers and schedule will be updated here.'}</p>
                 </div>
-                {socials[0] && (
-                  <a className="btn gold" href={socials[0][2]} target="_blank" rel="noopener noreferrer">
-                    Stay updated <span className="arr" aria-hidden="true">→</span>
-                  </a>
-                )}
               </div>
             )}
           </Section>
         )}
 
         {visible('speakers') && site.speakers.length > 0 && (
-          <Section id="s-speakers" label="Speakers" hidden={!p.show.speakers} tag={hiddenTag('speakers')}>
-            <h2>
-              <Rich text={p.speakersHeading || 'Speakers'} />
-            </h2>
-            <div className="spk">
+          <Section id="s-speakers" title={<Rich text={p.speakersHeading || 'Speakers'} />} hidden={!p.show.speakers} tag={hiddenTag('speakers')}>
+            <div className="spk sec-body rv">
               {site.speakers.map((s) => (
                 <article key={s.id} className={draftCls(s.status)}>
                   <div className="ph">
@@ -626,11 +512,8 @@ export default function Landing() {
         )}
 
         {visible('gallery') && site.gallery.length > 0 && (
-          <Section id="s-gallery" label="Gallery" hidden={!p.show.gallery} tag={hiddenTag('gallery')}>
-            <h2>
-              <Rich text={p.galleryHeading || 'Gallery'} />
-            </h2>
-            <div className="gal">
+          <Section id="s-gallery" title={<Rich text={p.galleryHeading || 'Gallery'} />} hidden={!p.show.gallery} tag={hiddenTag('gallery')}>
+            <div className="gal sec-body rv">
               {site.gallery.map((g) => (
                 <figure key={g.id} className={draftCls(g.status)}>
                   <img src={g.image.url} alt={g.image.alt} width={g.image.width} height={g.image.height} loading="lazy" />
@@ -646,91 +529,28 @@ export default function Landing() {
           </Section>
         )}
 
-        <section className="band band-wine band-reg rv-art" id="s-reg" aria-labelledby="s-reg-title">
-          <Art left="reg-left" right="close-right" />
-          <div className="wrap reg-in">
-            <p className="kicker">Registration</p>
-            <h2 id="s-reg-title" className="rv">
-              <Rich text={p.regHeading || 'Register once. Get your entry pass instantly.'} />
-            </h2>
-            <ol className="rsteps rv-kids">
-              {STEPS.map(([Icon, title, text], i) => (
-                <li key={title}>
-                  <span className="num" aria-hidden="true">
-                    {String(i + 1).padStart(2, '0')}
-                  </span>
-                  <span className="ic" aria-hidden="true">
-                    <Icon strokeWidth={1.6} />
-                  </span>
-                  <h3>{title}</h3>
-                  <p>{text}</p>
-                </li>
-              ))}
-            </ol>
-            {p.regNote && <p className="reg-note rv">{p.regNote}</p>}
-            <div className="reg-cta rv">
-              <RegisterButton open={open} large />
-              {open && (
-                <p className="reg-sub">
-                  Quick and easy registration <span aria-hidden="true">·</span> Get your entry pass instantly
-                </p>
+        {visible('venue') && (
+          <Section id="s-venue" title="Venue" hidden={!p.show.venue} tag={hiddenTag('venue')} leaves>
+            <div className="note rv">
+              <span className="note-ic" aria-hidden="true">
+                <MapPin strokeWidth={1.6} />
+              </span>
+              <div>
+                <h3>{p.venue || p.location || 'Venue'}</h3>
+                <p>{p.venueAddress || `${p.venue && p.location ? `${p.location}. ` : ''}Full venue details will be announced.`}</p>
+              </div>
+              {map && (
+                <a className="btn line" href={map} target="_blank" rel="noopener noreferrer">
+                  View on map <ArrowRight className="arr" aria-hidden="true" strokeWidth={2} />
+                </a>
               )}
             </div>
-          </div>
-        </section>
-
-        {showVenue && (
-          <Section id="s-contact" label={visible('contact') ? 'Venue & contact' : 'Venue'} hidden={!p.show.venue && !p.show.contact} art>
-            {visible('venue') && (
-              <div className={`vrow${!p.show.venue ? ' is-draft' : ''}`}>
-                <span className="vic" aria-hidden="true">
-                  <MapPin strokeWidth={1.6} />
-                </span>
-                <div>
-                  <h3>
-                    {p.venue || p.location || 'Venue'}
-                    <DraftTag label={hiddenTag('venue')} />
-                  </h3>
-                  <p className="addr">{p.venueAddress || `${p.venue && p.location ? `${p.location}. ` : ''}Full venue details will be announced.`}</p>
-                </div>
-                {map && (
-                  <a className="btn line" href={map} target="_blank" rel="noopener noreferrer">
-                    View on map <span className="arr" aria-hidden="true">→</span>
-                  </a>
-                )}
-              </div>
-            )}
-            {visible('contact') && (
-              <div className={`vc-card${!p.show.contact ? ' is-draft' : ''}`}>
-                <h3>
-                  Contact
-                  <DraftTag label={hiddenTag('contact')} />
-                </h3>
-                {contacts.length ? (
-                  <ul className="clist">
-                    {contacts.map(([label, text, href]) => (
-                      <li key={label}>
-                        <span>{label}</span>
-                        <a href={href} {...(/^https?:/.test(href) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
-                          {text}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="addr">Contact details will be published soon.</p>
-                )}
-              </div>
-            )}
           </Section>
         )}
 
         {visible('faq') && site.faqs.length > 0 && (
-          <Section id="s-faq" label="FAQ" hidden={!p.show.faq} tag={hiddenTag('faq')}>
-            <h2>
-              <Rich text={p.faqHeading || 'Questions'} />
-            </h2>
-            <div className="faq">
+          <Section id="s-faq" title={<Rich text={p.faqHeading || 'Questions'} />} hidden={!p.show.faq} tag={hiddenTag('faq')}>
+            <div className="faq sec-body rv">
               {site.faqs.map((f) => (
                 <details key={f.id} className={draftCls(f.status)}>
                   <summary>
@@ -746,48 +566,44 @@ export default function Landing() {
           </Section>
         )}
 
-        {p.closingText && (
-          <section className="close rv-art" aria-labelledby="close-title">
-            <Art right="close-right" />
-            <img className="art art-group" src="/brand/bg/women-group.webp" width={900} height={804} alt="" aria-hidden="true" loading="lazy" decoding="async" />
-            <div className="wrap rv-kids">
-              <p className="kicker">{plain(p.title)}</p>
-              <h2 id="close-title">
-                {/* "15 November 2026, *Ernakulam*": the emphasis goes on its own line, so the comma goes. */}
-                <Rich text={p.closingText.replace(/,\s*\*/, ' *')} />
-              </h2>
-              <div>
-                <RegisterButton open={open} large />
-              </div>
+        {showContact && (
+          <Section id="s-contact" title="Contact" hidden={!p.show.contact} tag={hiddenTag('contact')}>
+            <div className="note note-list rv">
+              {contacts.length ? (
+                <ul className="clist">
+                  {contacts.map(([label, text, href]) => (
+                    <li key={label}>
+                      <span>{label}</span>
+                      <a href={href} {...(/^https?:/.test(href) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
+                        {text}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>Contact details will be published soon.</p>
+              )}
             </div>
-          </section>
+          </Section>
         )}
       </main>
 
-      <footer className="ftr">
-        <div className="wrap ftr-in rv-kids">
+      <footer className="ftr" id={showContact ? undefined : 's-contact'}>
+        <Leaf at="lv-ftr-l" />
+        <Leaf at="lv-ftr-r" />
+        <div className="wrap-w ftr-in">
           <img src="/brand/bbb-logo-w.webp" width={204} height={220} alt="Being, Becoming, Belonging" loading="lazy" className="f-bbb" />
-          <img src="/brand/icw-logo.webp" width={560} height={242} alt="International Conference on Women" loading="lazy" className="f-icw" />
-          <img src="/brand/gio-logo-white.webp" width={299} height={220} alt="GIO Keralam" loading="lazy" className="f-gio" />
-          {socials.length > 0 && (
-            <ul className="social">
-              {socials.map(([label, , href]) => (
-                <li key={label}>
-                  <a href={href} target="_blank" rel="noopener noreferrer" aria-label={label}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      {SOCIAL_ICONS[label]}
-                    </svg>
-                  </a>
-                </li>
-              ))}
-            </ul>
-          )}
+          <img src="/brand/icw-logo-white.webp" width={560} height={243} alt="International Conference on Women" loading="lazy" className="f-icw" />
+          <div className="f-gio">
+            <img src="/brand/gio-mark-white.webp" width={299} height={183} alt="GIO Keralam" loading="lazy" />
+            <SocialLinks links={socials} />
+          </div>
         </div>
-        <div className="wrap">
+        <div className="wrap-w">
           <div className="ftr-base">
             <span>{p.footerText}</span>
             <span>
-              Powered by:{' '}
+              Powered by{' '}
               <a href="https://d4dx.co/" target="_blank" rel="noopener noreferrer" className="credit">
                 D4DX Innovations LLP
               </a>
@@ -796,14 +612,7 @@ export default function Landing() {
         </div>
       </footer>
 
-      {open && (
-        <div className={`sticky-cta${passedHero ? ' show' : ''}`} aria-hidden={!passedHero || undefined}>
-          <Link to="/register" className="btn btn-reg" tabIndex={passedHero ? undefined : -1}>
-            Register now <span className="arr" aria-hidden="true">→</span>
-          </Link>
-        </div>
-      )}
-      <BackToTop raised={open} />
+      <BackToTop />
     </div>
   );
 }
