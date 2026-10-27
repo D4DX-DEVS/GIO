@@ -1,85 +1,14 @@
-// Confirm / resend / generate actions and the entry pass viewer, shared by
-// the dashboard list and the registration detail page.
+// "Generate pass" (for a registration without one) and the entry pass
+// viewer, shared by the dashboard list and the registration detail page.
+// Passes are generated automatically at submission; admins only list them.
 import { useCallback, useState } from 'react';
 import type { ReactNode } from 'react';
-import { AlertTriangle, BadgeCheck, Download, ImageOff, Loader2, RefreshCw, Send, Ticket } from 'lucide-react';
+import { Download, ImageOff, Loader2, RefreshCw, Ticket } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
-import type { MessageResult, RegistrationDetail, RegistrationItem } from '../lib/types';
-import { TEMPLATE_LABEL } from '../lib/format';
+import type { RegistrationDetail, RegistrationItem } from '../lib/types';
 import { Button, Dialog, cx, useToast } from './ui';
 
-export type ActionKind = 'confirm' | 'resend' | 'generate';
-
-type Target = Pick<RegistrationItem, 'id' | 'name' | 'regNo' | 'mobileDisplay' | 'messagesTo' | 'passId' | 'passStatus'>;
-
-const ACTIONS: Record<
-  ActionKind,
-  { title: string; confirmLabel: string; path: (id: string) => string; icon: ReactNode; body: (r: Target) => ReactNode }
-> = {
-  confirm: {
-    title: 'Confirm this registration?',
-    confirmLabel: 'Yes, confirm registration',
-    path: (id) => `/api/admin/registrations/${id}/actions/confirm`,
-    icon: (
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600 ring-1 ring-inset ring-brand-100">
-        <BadgeCheck className="h-5 w-5" aria-hidden />
-      </span>
-    ),
-    body: (r) => (
-      <>
-        <Summary r={r} />
-        <p className="mt-4 font-medium text-slate-700">This will:</p>
-        <ul className="mt-2 space-y-1.5">
-          {['Mark the registration as Confirmed', 'Generate a unique entry pass', `Send the confirmation and the entry pass to ${r.messagesTo} on WhatsApp`].map(
-            (t) => (
-              <li key={t} className="flex gap-2">
-                <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" aria-hidden /> {t}
-              </li>
-            )
-          )}
-        </ul>
-        <p className="mt-3 text-xs text-slate-500">
-          A registration can be confirmed only once. If WhatsApp sending fails, the confirmation and the pass are kept and you can retry.
-        </p>
-      </>
-    ),
-  },
-  resend: {
-    title: 'Send the entry pass again?',
-    confirmLabel: 'Resend pass',
-    path: (id) => `/api/admin/registrations/${id}/pass/resend`,
-    icon: (
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600 ring-1 ring-inset ring-brand-100">
-        <Send className="h-5 w-5" aria-hidden />
-      </span>
-    ),
-    body: (r) => (
-      <>
-        <Summary r={r} />
-        <p className="mt-4">
-          The same entry pass ({r.passId}) is sent again to {r.messagesTo} on WhatsApp. No new pass is created.
-          {r.passStatus === 'sent' && ' Use this only if the registrant did not receive it.'}
-        </p>
-      </>
-    ),
-  },
-  generate: {
-    title: 'Generate the entry pass?',
-    confirmLabel: 'Generate and send',
-    path: (id) => `/api/admin/registrations/${id}/pass/generate`,
-    icon: (
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600 ring-1 ring-inset ring-brand-100">
-        <Ticket className="h-5 w-5" aria-hidden />
-      </span>
-    ),
-    body: (r) => (
-      <>
-        <Summary r={r} />
-        <p className="mt-4">Generating the pass failed earlier. A pass is generated now and sent to {r.messagesTo} on WhatsApp.</p>
-      </>
-    ),
-  },
-};
+type Target = Pick<RegistrationItem, 'id' | 'name' | 'regNo' | 'mobileDisplay' | 'passId' | 'status'>;
 
 function Summary({ r }: { r: Target }) {
   return (
@@ -87,95 +16,76 @@ function Summary({ r }: { r: Target }) {
       <p className="font-serif text-xl leading-tight text-slate-900">{r.name}</p>
       <p className="text-[13px] text-slate-500">
         {r.regNo} · {r.mobileDisplay}
-        {r.messagesTo !== r.mobileDisplay && ` · WhatsApp ${r.messagesTo}`}
       </p>
     </div>
   );
 }
 
-const SUCCESS: Record<ActionKind, string> = {
-  confirm: 'Registration confirmed and entry pass generated',
-  resend: 'Entry pass sent again',
-  generate: 'Entry pass generated',
-};
-
-/** Shows toasts for an action result, including each failed WhatsApp message. */
-export function useReportResult() {
-  const toast = useToast();
-  return useCallback(
-    (res: RegistrationDetail, success: string) => {
-      const messages: MessageResult[] = res.messages ?? [];
-      const failed = messages.filter((m) => !m.ok);
-      const accepted = messages.filter((m) => m.ok && !m.duplicate).length;
-      if (res.passError) toast('error', res.passError);
-      for (const m of failed) {
-        toast('error', `WhatsApp "${TEMPLATE_LABEL[m.template ?? ''] ?? 'message'}" failed: ${m.error}. You can retry it.`);
-      }
-      if (!res.passError && !failed.length) {
-        toast('success', accepted ? `${success}. WhatsApp message${accepted > 1 ? 's' : ''} accepted by DXing.` : `${success}.`);
-      } else if (!res.passError && failed.length) {
-        toast('info', `${success}, but not every WhatsApp message went out.`);
-      }
-    },
-    [toast]
-  );
-}
-
 /**
- * Returns `ask(kind, registration)` and the dialog element to render. The
- * server refuses repeats (e.g. a second confirm) whatever the client does;
- * the busy state here just stops a double click from sending two requests.
+ * Returns `ask(registration)` and the dialog element to render. The server
+ * never creates a second pass whatever the client does; the busy state here
+ * just stops a double click from sending two requests.
  */
-export function useRegistrationActions(onDone: (res: RegistrationDetail) => void) {
+export function useGeneratePass(onDone: (res: RegistrationDetail) => void) {
   const toast = useToast();
-  const report = useReportResult();
-  const [request, setRequest] = useState<{ kind: ActionKind; target: Target } | null>(null);
+  const [target, setTarget] = useState<Target | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const ask = useCallback((kind: ActionKind, target: Target) => setRequest({ kind, target }), []);
+  const ask = useCallback((t: Target) => setTarget(t), []);
 
   async function run() {
-    if (!request || busy) return;
-    const { kind, target } = request;
+    if (!target || busy) return;
     setBusy(true);
     try {
-      const res = await api<RegistrationDetail>(ACTIONS[kind].path(target.id), { method: 'POST', body: {} });
-      report(res, SUCCESS[kind]);
+      const res = await api<RegistrationDetail>(`/api/admin/registrations/${target.id}/pass/generate`, { method: 'POST', body: {} });
+      toast('success', 'Entry pass generated.');
       onDone(res);
-      setRequest(null);
     } catch (err) {
       toast('error', errorMessage(err));
-      setRequest(null);
     } finally {
+      setTarget(null);
       setBusy(false);
     }
   }
 
-  const def = request ? ACTIONS[request.kind] : null;
   const dialog = (
     <Dialog
-      open={Boolean(request)}
-      title={def?.title ?? ''}
-      icon={def?.icon}
-      onClose={() => !busy && setRequest(null)}
+      open={Boolean(target)}
+      title="Generate the entry pass?"
+      icon={
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600 ring-1 ring-inset ring-brand-100">
+          <Ticket className="h-5 w-5" aria-hidden />
+        </span>
+      }
+      onClose={() => !busy && setTarget(null)}
       footer={
         <>
-          <Button variant="secondary" onClick={() => setRequest(null)} disabled={busy}>
+          <Button variant="secondary" onClick={() => setTarget(null)} disabled={busy}>
             Cancel
           </Button>
           <Button loading={busy} onClick={run} data-autofocus>
-            {busy ? 'Working…' : def?.confirmLabel}
+            {busy ? 'Working…' : 'Generate pass'}
           </Button>
         </>
       }
     >
-      {request && def?.body(request.target)}
+      {target && (
+        <>
+          <Summary r={target} />
+          <p className="mt-4">
+            {target.status === 'submitted'
+              ? 'This registration was made before passes were generated automatically. It is confirmed and its entry pass is generated now.'
+              : 'Generating the pass failed when this registration was submitted. A pass is generated now.'}
+          </p>
+        </>
+      )}
     </Dialog>
   );
 
   return { ask, busy, dialog };
 }
 
+// Viewing redirects to the image on the Spaces CDN; download=1 sends it from this origin.
 export const passImageUrl = (id: string, passId: string | null, download = false) =>
   `/api/admin/registrations/${id}/pass.png?v=${encodeURIComponent(passId ?? '')}${download ? '&download=1' : ''}`;
 
@@ -238,18 +148,8 @@ export function PassImage({ id, passId, name, refreshKey = 0 }: { id: string; pa
   );
 }
 
-/** Modal with the pass image, download and resend. */
-export function PassViewer({
-  target,
-  canSend,
-  onClose,
-  onResend,
-}: {
-  target: Target | null;
-  canSend: boolean;
-  onClose: () => void;
-  onResend: (t: Target) => void;
-}) {
+/** Modal with the pass image and download. */
+export function PassViewer({ target, onClose }: { target: Target | null; onClose: () => void }) {
   return (
     <Dialog
       open={Boolean(target)}
@@ -257,32 +157,10 @@ export function PassViewer({
       title="Entry pass"
       description={target ? `${target.name} · ${target.passId}` : undefined}
       onClose={onClose}
-      footer={
-        target && (
-          <>
-            {canSend && (
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  onClose();
-                  onResend(target);
-                }}
-              >
-                <Send className="h-4 w-4" aria-hidden /> Resend
-              </Button>
-            )}
-            <DownloadPassLink id={target.id} passId={target.passId} className="btn-primary min-h-[44px] rounded-full px-5 text-sm" />
-          </>
-        )
-      }
+      footer={target && <DownloadPassLink id={target.id} passId={target.passId} className="btn-primary min-h-[44px] rounded-full px-5 text-sm" />}
     >
       {target && (
         <div className="mx-auto max-w-[19rem]">
-          {target.passStatus === 'send_failed' && (
-            <p className="mb-3 flex items-start gap-2 rounded-lg bg-red-50 p-2.5 text-[13px] text-red-700">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> The last WhatsApp send failed. The pass is saved; resend it when ready.
-            </p>
-          )}
           <PassImage id={target.id} passId={target.passId} name={target.name} />
         </div>
       )}

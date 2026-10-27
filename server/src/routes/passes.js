@@ -1,5 +1,7 @@
-// Signed, expiring link to a pass image. This is the URL handed to DXing; it
-// is not guessable and stops working after PASS_IMAGE_LINK_MINUTES.
+// Signed, expiring link to a pass image, given to the registrant on the
+// success page for "Download" and for sharing the image as a file. The image
+// itself is stored in DigitalOcean Spaces; this route reads it from there so
+// the browser gets it from this origin (the CDN sends no CORS headers).
 const express = require('express');
 const { EntryPass, Registration } = require('../models');
 const { STATUS } = require('../config/constants');
@@ -17,17 +19,18 @@ router.get(
     const deny = () => res.status(404).json({ error: 'Not found' });
     if (!link) return deny();
 
-    const pass = await EntryPass.findOne({ passId: req.params.passId, status: 'active', version: link.version });
-    if (!pass) return deny();
-    const registration = await Registration.findById(pass.registration).select('status');
+    const found = await EntryPass.findOne({ passId: req.params.passId, status: 'active', version: link.version });
+    if (!found) return deny();
+    const registration = await Registration.findById(found.registration).select('status');
     if (registration?.status !== STATUS.CONFIRMED) return deny();
 
-    const png = await passes.render(pass);
+    const { pass, png } = await passes.imageFile(found);
+    const disposition = req.query.download === '1' ? 'attachment' : 'inline';
     res.set({
       'Content-Type': 'image/png',
       'Cache-Control': 'private, no-store',
       'X-Robots-Tag': 'noindex',
-      'Content-Disposition': `inline; filename="entry-pass-${pass.passId}.png"`,
+      'Content-Disposition': `${disposition}; filename="entry-pass-${pass.passId}.png"`,
     });
     return res.send(png);
   })

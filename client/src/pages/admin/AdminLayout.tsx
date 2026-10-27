@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ComponentType } from 'react';
 import { Link, Outlet, useLocation, useOutletContext } from 'react-router-dom';
 import {
-  BadgeCheck,
   Bell,
   CalendarClock,
   ChevronDown,
@@ -16,11 +15,10 @@ import {
   Mic,
   ChevronRight,
   ExternalLink,
-  Hourglass,
   LayoutDashboard,
   LogOut,
   Menu,
-  SendHorizontal,
+  Ticket,
   TriangleAlert,
   X,
 } from 'lucide-react';
@@ -60,12 +58,10 @@ const NAV: Array<{ group: string; items: NavItem[] }> = [
     items: [{ label: 'Dashboard', to: '/admin', icon: LayoutDashboard, match: null }],
   },
   {
-    group: 'Workflow',
+    group: 'Registrations',
     items: [
-      { label: 'Awaiting confirmation', to: '/admin?status=submitted', icon: Hourglass, match: { status: 'submitted' }, count: (s) => s.awaitingConfirmation, tone: 'warn' },
-      { label: 'Confirmed', to: '/admin?status=confirmed', icon: BadgeCheck, match: { status: 'confirmed' } },
-      { label: 'Entry passes sent', to: '/admin?passStatus=sent', icon: SendHorizontal, match: { passStatus: 'sent' } },
-      { label: 'Pass send failed', to: '/admin?passStatus=send_failed', icon: TriangleAlert, match: { passStatus: 'send_failed' }, count: (s) => s.passSendFailed, tone: 'danger' },
+      { label: 'Entry pass issued', to: '/admin?pass=issued', icon: Ticket, match: { pass: 'issued' } },
+      { label: 'Without entry pass', to: '/admin?pass=missing', icon: TriangleAlert, match: { pass: 'missing' }, count: (s) => s.withoutPass, tone: 'warn' },
     ],
   },
 ];
@@ -74,7 +70,7 @@ function isActive(item: NavItem, pathname: string, search: string) {
   if (item.to.startsWith('/admin/website')) return pathname.replace(/\/$/, '') === item.to;
   if (pathname !== '/admin') return item.match === null && pathname.startsWith('/admin/registrations');
   const params = new URLSearchParams(search);
-  const keys = ['status', 'passStatus'];
+  const keys = ['pass'];
   if (item.match === null) return keys.every((k) => !params.get(k));
   return keys.every((k) => (params.get(k) ?? '') === (item.match![k] ?? ''));
 }
@@ -171,8 +167,8 @@ const PAGE_TITLES: Array<[RegExp, string, string]> = [
   [/^\/admin\/website\/faqs/, 'FAQs', 'Questions and answers'],
   [/^\/admin\/website\/gallery/, 'Gallery', 'Gallery images'],
   [/^\/admin\/website\/images/, 'Images', 'Image library'],
-  [/^\/admin\/registrations\//, 'Registration details', 'Review, confirm and manage the entry pass'],
-  [/^\/admin\/?$/, 'Dashboard', 'Registrations, confirmations and entry passes'],
+  [/^\/admin\/registrations\//, 'Registration details', 'Registration details and entry pass'],
+  [/^\/admin\/?$/, 'Dashboard', 'Registrations and entry passes'],
 ];
 
 function ProfileMenu({ onLogout }: { onLogout: () => void }) {
@@ -284,7 +280,8 @@ export default function AdminLayout() {
   }, [drawer]);
 
   const [, title, subtitle] = PAGE_TITLES.find(([rx]) => rx.test(location.pathname)) ?? [null, 'Admin', ''];
-  const alerts = stats ? stats.passSendFailed : 0;
+  // Registrations without an entry pass (generation failed, or from before passes were automatic).
+  const alerts = stats ? stats.withoutPass : 0;
   const onDetail = location.pathname.startsWith('/admin/registrations/');
   const onWebsite = location.pathname.startsWith('/admin/website');
 
@@ -358,10 +355,10 @@ export default function AdminLayout() {
               <p className="sr-only">{subtitle}</p>
             </div>
             <Link
-              to="/admin?passStatus=send_failed"
+              to="/admin?pass=missing"
               className="relative flex h-10 w-10 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
-              aria-label={alerts ? `${alerts} entry pass${alerts === 1 ? '' : 'es'} failed to send` : 'No failed sends'}
-              title={alerts ? `${alerts} failed to send` : 'No failed sends'}
+              aria-label={alerts ? `${alerts} registration${alerts === 1 ? '' : 's'} without an entry pass` : 'Every registration has an entry pass'}
+              title={alerts ? `${alerts} without an entry pass` : 'Every registration has an entry pass'}
             >
               <Bell className="h-5 w-5" aria-hidden />
               {alerts > 0 && (

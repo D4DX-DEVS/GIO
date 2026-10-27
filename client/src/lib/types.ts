@@ -1,7 +1,6 @@
-// Registration workflow: Submitted -> Confirmed. The entry pass steps
-// (generated, sent) are tracked separately in PassStatus.
+// Registrations are confirmed automatically and get their entry pass at
+// submission. "submitted" only remains on registrations made before that.
 export type Status = 'submitted' | 'confirmed';
-export type PassStatus = 'not_generated' | 'generated' | 'sent' | 'send_failed';
 export type Role = 'admin' | 'staff';
 export type Permission = 'view' | 'approve' | 'send' | 'gate' | 'content';
 
@@ -16,13 +15,20 @@ export type PublicConfig = {
   ageMin: number;
   ageMax: number;
   districts: string[];
-  defaultCountryCode: string;
-  countries: Array<{ dial: string; iso: string; name: string; lengths: number[]; starts: string }>;
+  // Country preselected for the phone and WhatsApp numbers (ISO code, e.g. "IN").
+  defaultCountry: string;
   formVersion: number;
   placeRequired: boolean;
-  // Empty / null until an admin sets them; the form then leaves the question out.
+  // Empty until an admin sets them; the form then leaves the question out.
   genderOptions: string[];
-  children: { max: number; ageMin: number; ageMax: number } | null;
+  children: { max: number; ageMin: number; ageMax: number };
+};
+
+/** POST /api/public/registrations */
+export type SubmissionResult = {
+  regNo: string;
+  name: string;
+  pass: { passId: string; imageUrl: string; downloadUrl: string };
 };
 
 export type RegistrationItem = {
@@ -40,18 +46,15 @@ export type RegistrationItem = {
   formVersion: number;
   gender: string | null;
   place: string | null;
+  // The registrant's photo on the CDN; null for older registrations.
+  photoUrl: string | null;
   whatsapp: string | null;
   whatsappDisplay: string | null;
-  messagesTo: string;
   childrenCount: number | null;
   status: Status;
-  statusChangedAt: string;
-  confirmedAt: string | null;
-  confirmedByName: string | null;
   passId: string | null;
-  passStatus: PassStatus;
+  hasPass: boolean;
   passGeneratedAt: string | null;
-  passSentAt: string | null;
   createdAt: string;
 };
 
@@ -63,44 +66,26 @@ export type PassInfo = {
   status: 'active' | 'revoked';
   issuedAt: string;
   imageUrl: string | null;
+  downloadUrl: string | null;
 };
 
-export type NotificationInfo = {
-  id: string;
-  template: string;
-  status: 'sending' | 'accepted' | 'failed';
-  attempts: number;
-  lastError: string | null;
-  triggeredByName: string;
-  acceptedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type Permissions = { approve: boolean; send: boolean; gate: boolean };
-
-export type MessageResult = { ok: boolean; duplicate: boolean; error: string | null; template: string | null };
+export type Permissions = { send: boolean; gate: boolean };
 
 export type RegistrationDetail = {
-  registration: RegistrationItem & { statusHistory: HistoryEntry[]; updatedAt: string; childAges: number[] | null };
+  // children: null = not recorded (older registrations); name is null for children recorded before names were asked.
+  registration: RegistrationItem & { statusHistory: HistoryEntry[]; updatedAt: string; children: Array<{ name: string | null; age: number }> | null };
   pass: PassInfo | null;
-  notifications: NotificationInfo[];
   permissions: Permissions;
-  messages?: MessageResult[];
-  passError?: string | null;
 };
 
 export type ListResponse = { items: RegistrationItem[]; total: number; page: number; limit: number; pages: number };
 
 export type Stats = {
   total: number;
-  awaitingConfirmation: number;
-  confirmed: number;
-  passesSent: number;
-  passSendFailed: number;
-  byStatus: Record<Status, number>;
-  byPassStatus: Record<PassStatus, number>;
-  failedMessages: number;
+  passesIssued: number;
+  withoutPass: number;
+  // Accompanying children across all registrations.
+  children: number;
 };
 
 export type FilterOptions = { districts: string[]; areas: string[]; units: string[] };

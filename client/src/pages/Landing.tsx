@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode, RefObject } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { BookOpen, CalendarDays, Check, ChevronLeft, ChevronRight, FileText, MapPin, Network, Play, QrCode, UserRound, Users } from 'lucide-react';
+import { BookOpen, CalendarDays, ChevronLeft, ChevronRight, Download, FileText, MapPin, Network, Play, QrCode, UserRound, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import '../site.css';
 import { api, ApiError } from '../lib/api';
@@ -273,9 +273,9 @@ const PILLARS: Array<[LucideIcon, string]> = [
 ];
 
 const STEPS: Array<[LucideIcon, string, string]> = [
-  [FileText, 'Fill in the form', 'You receive a registration number at once.'],
-  [Check, 'Confirmation', 'GIO Keralam reviews and confirms your registration.'],
-  [QrCode, 'Entry pass', 'A pass with a QR code is sent on WhatsApp for the entrance.'],
+  [FileText, 'Fill in the form', 'Add any children coming with you. You get a registration number at once.'],
+  [QrCode, 'Entry pass', 'Your pass with a QR code is ready as soon as you submit.'],
+  [Download, 'Download or share', 'Keep the pass on your phone or print it for the entrance.'],
 ];
 
 const SOCIAL_ICONS: Record<string, ReactNode> = {
@@ -651,7 +651,7 @@ export default function Landing() {
           <div className="wrap reg-in">
             <p className="kicker">Registration</p>
             <h2 id="s-reg-title" className="rv">
-              <Rich text={p.regHeading || 'Register once. Your entry pass comes on WhatsApp.'} />
+              <Rich text={p.regHeading || 'Register once. Get your entry pass instantly.'} />
             </h2>
             <ol className="rsteps rv-kids">
               {STEPS.map(([Icon, title, text], i) => (
@@ -672,7 +672,7 @@ export default function Landing() {
               <RegisterButton open={open} large />
               {open && (
                 <p className="reg-sub">
-                  Quick and easy registration <span aria-hidden="true">·</span> Get your entry pass on WhatsApp
+                  Quick and easy registration <span aria-hidden="true">·</span> Get your entry pass instantly
                 </p>
               )}
             </div>

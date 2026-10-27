@@ -106,7 +106,7 @@ export const FALLBACK_SITE: PublicSite = {
     speakersHeading: '',
     galleryHeading: '',
     faqHeading: '',
-    regHeading: 'Register once. Your entry pass comes on WhatsApp.',
+    regHeading: 'Register once. Get your entry pass instantly.',
     regNote: '',
     phone: '',
     whatsapp: '',

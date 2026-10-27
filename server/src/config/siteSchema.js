@@ -9,7 +9,7 @@
 // Text is stored as plain text. `*word*` marks emphasis in headings; the
 // client renders it as <em> without ever interpreting HTML.
 const { z } = require('zod');
-const { FORM_RULE_LIMITS } = require('./constants');
+const { FORM_RULE_LIMITS, CHILDREN_DEFAULTS } = require('./constants');
 
 const ASSET_ID = /^[a-f0-9]{24}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -130,7 +130,7 @@ const EMPTY_PAGE = Object.freeze({
   speakersHeading: 'Speakers',
   galleryHeading: 'Gallery',
   faqHeading: 'Questions',
-  regHeading: 'Register once. Your entry pass comes on WhatsApp.',
+  regHeading: 'Register once. Get your entry pass instantly.',
   regNote: '',
   phone: '',
   whatsapp: '',
@@ -213,8 +213,16 @@ const ASSET_FIELDS = {
 /** Plain text of a heading with `*emphasis*` marks removed. */
 const plain = (s) => String(s || '').replace(/\*/g, '').replace(/\s+/g, ' ').trim();
 
-/** Whether the children question is enabled by the admin-set rules. */
-const childrenEnabled = (form) => Boolean(form && form.childrenMax && form.childAgeMin !== null && form.childAgeMax !== null);
+/**
+ * Limits for the accompanying children question: the admin-set rules when all
+ * three are set, otherwise CHILDREN_DEFAULTS. The question is always asked.
+ */
+function childrenRules(form) {
+  if (form && form.childrenMax && form.childAgeMin !== null && form.childAgeMax !== null) {
+    return { max: form.childrenMax, ageMin: form.childAgeMin, ageMax: form.childAgeMax };
+  }
+  return { ...CHILDREN_DEFAULTS };
+}
 
 module.exports = {
   pageSettings,
@@ -226,5 +234,5 @@ module.exports = {
   ASSET_FIELDS,
   SECTIONS,
   plain,
-  childrenEnabled,
+  childrenRules,
 };

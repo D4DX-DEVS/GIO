@@ -4,8 +4,8 @@
 // so that a valid code cannot be produced by guessing or editing a pass ID,
 // and re-issuing a pass (version + 1) invalidates the old QR.
 //
-// The pass image is served from a link that carries an expiry and a
-// signature, so DXing can download it without the image ever being public.
+// The pass download link on the success page carries an expiry and a
+// signature, so it cannot be built from a pass ID.
 const crypto = require('crypto');
 const { env } = require('../config/env');
 
