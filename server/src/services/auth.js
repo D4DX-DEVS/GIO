@@ -1,37 +1,47 @@
-const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { Admin } = require('../models');
+const { env } = require('../config/env');
 const { HttpError } = require('../utils/httpError');
-const { ROLE_PERMISSIONS } = require('../config/constants');
+const { ROLES, ROLE_PERMISSIONS } = require('../config/constants');
 
 const MAX_FAILED = 5;
 const LOCK_MINUTES = 15;
-const BCRYPT_ROUNDS = 12;
-// Compared against when the username does not exist, so response time does
-// not reveal which usernames are valid.
-const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', BCRYPT_ROUNDS);
 
-function hashPassword(password) {
-  return bcrypt.hash(password, BCRYPT_ROUNDS);
+// Compares fixed-length digests, so the time taken does not depend on how
+// much of the input matches or how long it is.
+function safeEqual(a, b) {
+  const digest = (s) => crypto.createHash('sha256').update(s).digest();
+  return crypto.timingSafeEqual(digest(a), digest(b));
 }
 
-function validatePassword(password) {
-  if (typeof password !== 'string' || password.length < 10) return 'Password must be at least 10 characters.';
-  if (password.length > 128) return 'Password must be at most 128 characters.';
-  return null;
+/**
+ * The admin signs in with ADMIN_USERNAME / ADMIN_PASSWORD from the
+ * environment. Its Admin record holds no password, only session and lockout
+ * state, and its id is what audit fields (confirmedBy, updatedBy...) store.
+ */
+function envAdminRecord() {
+  return Admin.findOneAndUpdate(
+    { username: env.admin.username },
+    { $set: { role: ROLES.ADMIN, active: true }, $setOnInsert: { name: env.admin.username } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 }
 
 async function authenticate(username, password) {
   if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) {
     throw new HttpError(400, 'Username and password are required.');
   }
-  const admin = await Admin.findOne({ username: username.trim().toLowerCase() }).select('+passwordHash');
-  const ok = await bcrypt.compare(password.slice(0, 128), admin ? admin.passwordHash : DUMMY_HASH);
+  if (!env.admin.username || !env.admin.password) throw new HttpError(503, 'Admin sign-in is not configured.');
+  const userOk = safeEqual(username.trim().toLowerCase(), env.admin.username);
+  const passOk = safeEqual(password, env.admin.password);
+  // Loaded whatever the username, so response time does not reveal it.
+  const admin = await envAdminRecord();
 
-  if (!admin || !admin.active) throw new HttpError(401, 'Invalid username or password.');
+  if (!userOk) throw new HttpError(401, 'Invalid username or password.');
   if (admin.lockUntil && admin.lockUntil > new Date()) {
     throw new HttpError(423, 'Too many failed attempts. Try again in a few minutes.');
   }
-  if (!ok) {
+  if (!passOk) {
     const failed = admin.failedLogins + 1;
     const update = failed >= MAX_FAILED
       ? { failedLogins: 0, lockUntil: new Date(Date.now() + LOCK_MINUTES * 60 * 1000) }
@@ -61,4 +71,4 @@ function publicProfile(admin) {
   };
 }
 
-module.exports = { authenticate, hashPassword, validatePassword, revokeSessions, publicProfile };
+module.exports = { authenticate, revokeSessions, publicProfile };

@@ -5,7 +5,7 @@
 const { test, before, after, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
-const { start, stop, createAdmin, login, pngSize, request } = require('./helpers');
+const { start, stop, login, pngSize, request } = require('./helpers');
 const { Registration, EntryPass, Notification } = require('../src/models');
 const { mockOutbox } = require('../src/providers/dxing');
 const { qrPayload } = require('../src/utils/passTokens');
@@ -13,7 +13,6 @@ const { buildText } = require('../src/services/templates');
 
 let app;
 let admin;
-let staff;
 const H = { 'X-Requested-With': 'rms' };
 const now = new Date('2026-10-20T10:00:00Z');
 
@@ -53,10 +52,7 @@ let oldPassId;
 
 before(async () => {
   app = await start();
-  await createAdmin('chief', 'admin');
-  await createAdmin('helper', 'staff');
-  admin = await login(app, 'chief');
-  staff = await login(app, 'helper');
+  admin = await login(app);
 
   submittedId = (await Registration.collection.insertOne(oldRegistration())).insertedId;
   confirmedId = (
@@ -138,11 +134,11 @@ describe('old pass', () => {
     assert.equal(img.status, 200);
     assert.deepEqual(pngSize(img.body), { width: 1080, height: 1660 });
 
-    const v = await staff.post('/api/admin/passes/verify').set(H).send({ code: qrPayload(oldPassId, 1) });
+    const v = await admin.post('/api/admin/passes/verify').set(H).send({ code: qrPayload(oldPassId, 1) });
     assert.equal(v.body.valid, true);
     assert.equal(v.body.registration.name, 'Old Confirmed');
     assert.equal(v.body.pass.holder.childrenCount, undefined);
-    assert.equal((await staff.post('/api/admin/passes/verify').set(H).send({ code: oldPassId })).body.valid, true);
+    assert.equal((await admin.post('/api/admin/passes/verify').set(H).send({ code: oldPassId })).body.valid, true);
   });
 
   test('resend goes to the mobile number with the original caption', async () => {

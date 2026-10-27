@@ -5,7 +5,8 @@ const adminSchema = new mongoose.Schema(
   {
     username: { type: String, required: true, unique: true, trim: true, lowercase: true, maxlength: 60 },
     name: { type: String, required: true, trim: true, maxlength: 120 },
-    passwordHash: { type: String, required: true, select: false },
+    // No password here: the admin signs in with ADMIN_USERNAME / ADMIN_PASSWORD
+    // from the environment (services/auth.js).
     role: { type: String, enum: Object.values(ROLES), default: ROLES.STAFF },
     active: { type: Boolean, default: true },
     // Incremented on logout / password change; tokens carrying an older value

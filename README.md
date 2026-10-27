@@ -11,7 +11,7 @@ This is a standalone application with its own database, configuration and admin 
 - [Stack and structure](#stack-and-structure)
 - [Local setup](#local-setup)
 - [Configuration (`server/.env`)](#configuration-serverenv)
-- [Creating admin accounts](#creating-admin-accounts)
+- [Admin sign-in](#admin-sign-in)
 - [Conference website](#conference-website)
 - [Registration form](#registration-form)
 - [Image storage](#image-storage)
@@ -29,7 +29,7 @@ This is a standalone application with its own database, configuration and admin 
 |---|---|
 | Client | React 18, TypeScript, Vite 5, Tailwind CSS 3, React Router 6 |
 | Server | Node.js 20+, Express 4, Mongoose 8 (MongoDB), zod validation |
-| Auth | bcrypt password hashes, JWT in an httpOnly SameSite=Strict cookie, server-side revocation |
+| Auth | Admin username and password from `.env`, JWT in an httpOnly SameSite=Strict cookie, server-side revocation |
 | Entry pass | `canvas` (PNG rendering) and `qrcode` |
 | WhatsApp | DXing HTTP API, isolated behind one adapter |
 
@@ -51,7 +51,6 @@ gio/
 │       └── lib/                               # api wrapper, auth context, types, labels
 └── server/
     ├── .env.example
-    ├── scripts/create-admin.js   # create the first admin or reset a password
     ├── src/
     │   ├── app.js / server.js
     │   ├── config/env.js         # every setting, read from the environment
@@ -77,8 +76,7 @@ You need Node.js 20 or later, and a MongoDB database created for this app only. 
 
 ```bash
 npm run install:all                  # installs server and client dependencies
-cp server/.env.example server/.env   # then edit; see the next section
-npm run create-admin -- --username yourname --name "Your Name" --role admin
+cp server/.env.example server/.env   # then edit, including ADMIN_USERNAME / ADMIN_PASSWORD
 ```
 
 For a local database, `npm run db` starts MongoDB at the host and port in `MONGODB_URI` (for example `mongodb://127.0.0.1:27018/registration_system`), with its data in `server/.data/db`. Keep that terminal open; the server cannot start without it.
@@ -143,20 +141,18 @@ To generate a secret:
 node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 ```
 
-## Creating admin accounts
+## Admin sign-in
+
+There is one admin account, set in `server/.env`:
 
 ```bash
-npm run create-admin -- --username alice --name "Alice" --role admin
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=a-password-of-at-least-10-characters
 ```
 
-The script asks for the password and hides what you type. It never takes the password as a command-line argument. For scripted setups, put it in the `RMS_ADMIN_PASSWORD` environment variable instead. Passwords must be at least 10 characters.
+The server refuses to start without them. The password is stored and compared as plain text, so keep `.env` private. Database accounts cannot sign in. To change the credentials, edit `.env` and restart the server; every existing session is signed out.
 
-If you run the command again for an existing username, it resets that account's password and role and signs the account out everywhere.
-
-| Role | Can do |
-|---|---|
-| `admin` | Everything: confirm registrations, generate, send or resend passes, retry messages, edit and publish the website |
-| `staff` | View registrations and verify passes. Cannot confirm registrations, send passes or edit the website. |
+The admin can do everything: confirm registrations, generate, send or resend passes, retry messages, verify passes, and edit and publish the website.
 
 ## Conference website
 
@@ -286,14 +282,14 @@ To change the wording, edit `server/src/services/templates.js`.
 - **QR content.** `<passId>.<version>.<HMAC signature>`. Changing any character makes the code invalid.
 - **Where admins see it.** The registration page shows the pass from `/api/admin/registrations/:id/pass.png`, which requires a signed-in session. It has View and Download buttons.
 - **The link DXing gets.** `/api/passes/:passId/image?v=&exp=&sig=` is signed and expires (60 minutes by default). Every failure returns the same `404`, and images are served with `Cache-Control: private, no-store`. The pass is never stored at a permanent public URL.
-- **Checking a pass.** `POST /api/admin/passes/verify {code}` (roles `admin` and `staff`) checks the signature, version, revocation and registration status. There is no scanner screen yet; see the open items at the end.
+- **Checking a pass.** `POST /api/admin/passes/verify {code}` (signed-in admin) checks the signature, version, revocation and registration status. There is no scanner screen yet; see the open items at the end.
 
 ## Security
 
-- Admin routes require a session cookie: httpOnly, `SameSite=Strict`, and `Secure` in production. Each request reloads the admin record, so deactivating an account, changing its role or logging out takes effect immediately. Logout revokes the session on the server.
+- Admin routes require a session cookie: httpOnly, `SameSite=Strict`, and `Secure` in production. Each request reloads the admin record, so logging out or changing the credentials in `.env` takes effect immediately. Logout revokes the session on the server.
 - Permissions are checked on the server for every action, per role.
 - State-changing admin requests must carry an `X-Requested-With: rms` header. This is a CSRF check on top of SameSite.
-- Passwords are hashed with bcrypt (12 rounds). After 5 failed sign-ins an account is locked for 15 minutes. Login timing does not reveal which usernames exist.
+- The admin password is read from `.env` as plain text and compared in constant time. After 5 failed sign-ins the account is locked for 15 minutes. Login timing does not reveal whether the username was right.
 - Rate limits are 30 submissions per hour per IP and 20 login attempts per 15 minutes per IP (production values).
 - Every input is validated on the server with zod. Unknown fields are rejected, and a hidden honeypot field catches bots. Search terms are regex-escaped, and sort and filter values come from fixed lists.
 - The public API returns only the registration number and name. It exposes no list or lookup endpoint.
@@ -321,7 +317,7 @@ General set-up:
    NODE_ENV=production npm start      # or run it under pm2 / systemd
    ```
 4. Production `.env`: set `NODE_ENV=production`, `PUBLIC_BASE_URL=https://your-domain`, `TRUST_PROXY=1` and fresh secrets.
-5. Create the first admin with `npm run create-admin -- ...` on the server.
+5. Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` in the production `.env`.
 6. **`canvas` system packages.** On Linux, `canvas` needs Cairo and Pango, and the pass needs fonts. On Debian or Ubuntu: `apt install libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libjpeg62-turbo libgif7 librsvg2-2 fonts-noto-core`. Add `fonts-noto-ui-indic` or similar if names may be written in Indic scripts. Prebuilt binaries cover Windows and macOS.
 7. Make sure the reverse proxy forwards `/api/passes/*` publicly, because DXing must reach it, and accepts request bodies up to 5 MB on `/api/admin/website/assets` (image uploads).
 
@@ -336,12 +332,12 @@ The tests run against an in-memory MongoDB and need no setup. They use a local f
 | Area | Covered |
 |---|---|
 | Public form | Name: letters and spaces only. Mobile: digits only, correct length and leading digit, country code from the list. Age, email, district from the list. Unknown fields and honeypot, Submitted status, acknowledgement text says "not confirmed", idempotent resubmission, duplicate person, registration closed |
-| Auth | 401 without a session, account lockout, cookie flags, CSRF header, logout revocation |
-| Workflow | Only Submitted and Confirmed exist. Staff cannot confirm. A concurrent double Confirm produces one transition, one pass and one set of messages. Confirm sends a text and the pass image. A second Confirm is refused. |
+| Auth | 401 without a session, account lockout, only the `.env` admin can sign in, credential change signs out sessions, cookie flags, CSRF header, logout revocation |
+| Workflow | Only Submitted and Confirmed exist. A concurrent double Confirm produces one transition, one pass and one set of messages. Confirm sends a text and the pass image. A second Confirm is refused. |
 | Passes | Signed link works; tampered, expired and unsigned links get 404. Admin-only image route. Generate refused when a pass exists. Resend cooldown. QR verify rejects forgeries. |
 | DXing | Payload shape. Rejected response, HTTP 503 and unreachable host are all recorded, not thrown. Pass kept on failure. Retry. A second retry is refused. |
 | Listing | Search by name, mobile and email. Regex characters treated literally. Every filter, every sort, pagination, filter options, stats. |
-| Website (`content.test.js`) | 401 and 403 for signed-out users and staff, CSRF header, validation (safe links, form rules), drafts not public, preview, publish, discard, version conflicts, hidden-section text not sent, registration switch, event details reaching messages and passes, programme, speakers and FAQs (publish, unpublish, order, delete), persistence across a restart |
+| Website (`content.test.js`) | 401 for signed-out users, CSRF header, validation (safe links, form rules), drafts not public, preview, publish, discard, version conflicts, hidden-section text not sent, registration switch, event details reaching messages and passes, programme, speakers and FAQs (publish, unpublish, order, delete), persistence across a restart |
 | Images (`content.test.js`) | Type from the bytes (SVG, GIF and text sent as an image refused), size limits, a header claiming a huge image, EXIF and GPS removed, rotation, replace, in-use delete refused, delete, both storage backends |
 | Form version 2 (`registration-v2.test.js`) | Place, WhatsApp (same, different, invalid), gender and children with and without admin rules, duplicate rule unchanged, idempotency, recipient of the acknowledgement, confirmation, pass and retry, children on messages and pass (never ages), pass size, gate check, ages for admins only, search |
 | Older records (`legacy-records.test.js`) | Registrations and passes inserted exactly as the original code wrote them: "not recorded" fields, filters, original pass size, gate check, resend and confirm to the mobile number, original message wording, stored documents not rewritten |

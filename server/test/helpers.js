@@ -2,6 +2,8 @@
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test-jwt-secret-that-is-at-least-32-characters';
 process.env.PASS_SIGNING_SECRET = 'test-pass-secret-that-is-at-least-32-characters';
+process.env.ADMIN_USERNAME = 'chief';
+process.env.ADMIN_PASSWORD = 'correct-horse-battery';
 process.env.DXING_MODE = 'mock';
 process.env.EVENT_NAME = 'Test Conference';
 process.env.EVENT_DATE = '1 Jan 2027';
@@ -15,8 +17,6 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 const request = require('supertest');
 const { env } = require('../src/config/env');
 const { createApp } = require('../src/app');
-const { Admin } = require('../src/models');
-const { hashPassword } = require('../src/services/auth');
 
 let mongo;
 
@@ -32,11 +32,9 @@ async function stop() {
   await mongo.stop();
 }
 
-async function createAdmin(username, role = 'admin', password = 'correct-horse-battery') {
-  return Admin.create({ username, name: `${username} user`, role, passwordHash: await hashPassword(password) });
-}
-
-async function login(app, username, password = 'correct-horse-battery') {
+/** Signs in as the admin from ADMIN_USERNAME / ADMIN_PASSWORD above. */
+async function login(app) {
+  const { username, password } = env.admin;
   const agent = request.agent(app);
   const res = await agent.post('/api/auth/login').set('X-Requested-With', 'rms').send({ username, password });
   if (res.status !== 200) throw new Error(`login failed: ${res.status} ${JSON.stringify(res.body)}`);
@@ -136,4 +134,4 @@ function jpegWithExif(width, height, orientation) {
 /** Width and height from a PNG header. */
 const pngSize = (b) => ({ width: b.readUInt32BE(16), height: b.readUInt32BE(20) });
 
-module.exports = { start, stop, createAdmin, login, fakeDxing, sample, sampleV2, image, jpegWithExif, pngSize, request, env };
+module.exports = { start, stop, login, fakeDxing, sample, sampleV2, image, jpegWithExif, pngSize, request, env };

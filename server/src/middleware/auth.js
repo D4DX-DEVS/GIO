@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { env } = require('../config/env');
 const { Admin } = require('../models');
@@ -16,8 +17,18 @@ function cookieOptions() {
   };
 }
 
+// Changes whenever ADMIN_USERNAME or ADMIN_PASSWORD changes, so editing .env
+// and restarting signs out every existing session.
+function credentialStamp() {
+  return crypto
+    .createHmac('sha256', env.jwtSecret)
+    .update(`${env.admin.username}\n${env.admin.password}`)
+    .digest('base64url')
+    .slice(0, 22);
+}
+
 function issueSession(res, admin) {
-  const token = jwt.sign({ sub: String(admin._id), tv: admin.tokenVersion }, env.jwtSecret, {
+  const token = jwt.sign({ sub: String(admin._id), tv: admin.tokenVersion, cs: credentialStamp() }, env.jwtSecret, {
     expiresIn: `${env.sessionHours}h`,
     algorithm: 'HS256',
   });
@@ -30,8 +41,9 @@ function clearSession(res) {
 }
 
 /**
- * Loads the signed-in admin on every request, so deactivation, role changes
- * and logout (tokenVersion bump) take effect immediately.
+ * Loads the signed-in admin on every request, so logout (tokenVersion bump)
+ * and a credential change in .env take effect immediately. Only the account
+ * named by ADMIN_USERNAME is accepted.
  */
 const requireAuth = asyncHandler(async (req, _res, next) => {
   const token = req.cookies?.[COOKIE];
@@ -42,8 +54,9 @@ const requireAuth = asyncHandler(async (req, _res, next) => {
   } catch {
     throw new HttpError(401, 'Your session has expired. Please sign in again.');
   }
+  if (payload.cs !== credentialStamp()) throw new HttpError(401, 'Your session has expired. Please sign in again.');
   const admin = await Admin.findById(payload.sub);
-  if (!admin || !admin.active || admin.tokenVersion !== payload.tv) {
+  if (!admin || !admin.active || admin.username !== env.admin.username || admin.tokenVersion !== payload.tv) {
     throw new HttpError(401, 'Your session has expired. Please sign in again.');
   }
   req.admin = admin;

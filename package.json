@@ -10,7 +10,6 @@
     "db": "npm --prefix server run db",
     "dev:server":"npm --prefix server run dev",
     "dev:client": "npm --prefix client run dev",
-    "create-admin": "npm --prefix server run create-admin --",
     "migrate": "npm --prefix server run migrate --",
     "test": "npm --prefix server test",
     "seed-site": "npm --prefix server run seed-site --",

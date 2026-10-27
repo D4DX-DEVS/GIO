@@ -7,7 +7,6 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "db": "node scripts/start-db.js",
-    "create-admin": "node scripts/create-admin.js",
     "migrate": "node scripts/migrate-workflow.js",
     "normalize-districts": "node scripts/normalize-districts.js",
     "test": "node --test --test-concurrency=1 test/*.test.js",

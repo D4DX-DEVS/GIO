@@ -4,14 +4,13 @@
 // real ones are set by admins once decided.
 const { test, before, after, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const { start, stop, createAdmin, login, sample, sampleV2, pngSize, fakeDxing, request } = require('./helpers');
+const { start, stop, login, sample, sampleV2, pngSize, fakeDxing, request } = require('./helpers');
 const { Registration, EntryPass, Notification } = require('../src/models');
 const { mockOutbox } = require('../src/providers/dxing');
 const { EMPTY_PAGE } = require('../src/config/siteSchema');
 
 let app;
 let admin;
-let staff;
 const H = { 'X-Requested-With': 'rms' };
 
 const submit = (body, key) => {
@@ -52,10 +51,7 @@ async function waitFor(fn, ms = 3000) {
 
 before(async () => {
   app = await start();
-  await createAdmin('chief', 'admin');
-  await createAdmin('helper', 'staff');
-  admin = await login(app, 'chief');
-  staff = await login(app, 'helper');
+  admin = await login(app);
 });
 
 after(stop);
@@ -238,7 +234,7 @@ describe('messages and entry pass', () => {
   test('gate check shows the number of children', async () => {
     const p = await EntryPass.findOne({ registration: reg._id });
     const { qrPayload } = require('../src/utils/passTokens');
-    const v = await staff.post('/api/admin/passes/verify').set(H).send({ code: qrPayload(p.passId, p.version) });
+    const v = await admin.post('/api/admin/passes/verify').set(H).send({ code: qrPayload(p.passId, p.version) });
     assert.equal(v.body.valid, true);
     assert.equal(v.body.pass.holder.childrenCount, 2);
     assert.equal(v.body.registration.childrenCount, 2);
@@ -256,7 +252,7 @@ describe('messages and entry pass', () => {
     assert.deepEqual(pngSize(img.body), { width: 1080, height: 1660 + 100 }, 'place row only');
   });
 
-  test('admin detail shows the new fields; ages for admins only', async () => {
+  test('admin detail shows the new fields', async () => {
     const d = (await admin.get(`/api/admin/registrations/${reg._id}`)).body.registration;
     assert.equal(d.gender, 'Female');
     assert.equal(d.place, 'Aluva');
@@ -264,9 +260,6 @@ describe('messages and entry pass', () => {
     assert.equal(d.childrenCount, 2);
     assert.deepEqual(d.childAges, [3, 9]);
     assert.equal(d.formVersion, 2);
-    const s = (await staff.get(`/api/admin/registrations/${reg._id}`)).body.registration;
-    assert.equal(s.childrenCount, 2);
-    assert.equal(s.childAges, null);
   });
 
   test('search covers place and the WhatsApp number', async () => {

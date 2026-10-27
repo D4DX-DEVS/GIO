@@ -1,14 +1,14 @@
 const { test, before, after, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
-const { start, stop, createAdmin, login, fakeDxing, sample, request, env } = require('./helpers');
-const { Registration, Notification, EntryPass } = require('../src/models');
+const jwt = require('jsonwebtoken');
+const { start, stop, login, fakeDxing, sample, request, env } = require('./helpers');
+const { Admin, Registration, Notification, EntryPass } = require('../src/models');
 const { mockOutbox } = require('../src/providers/dxing');
 const { parseQrPayload, qrPayload } = require('../src/utils/passTokens');
 
 let app;
 let admin;
-let staff;
 const H = { 'X-Requested-With': 'rms' };
 
 async function waitFor(fn, ms = 3000) {
@@ -38,10 +38,7 @@ const act = (agent, id, action) => agent.post(`/api/admin/registrations/${id}/ac
 
 before(async () => {
   app = await start();
-  await createAdmin('chief', 'admin');
-  await createAdmin('helper', 'staff');
-  admin = await login(app, 'chief');
-  staff = await login(app, 'helper');
+  admin = await login(app);
 });
 
 after(stop);
@@ -205,17 +202,41 @@ describe('authentication', () => {
   });
 
   test('wrong password is refused; account locks after repeated failures', async () => {
-    await createAdmin('victim', 'admin');
+    const { username, password } = env.admin;
     for (let i = 0; i < 5; i += 1) {
-      const r = await request(app).post('/api/auth/login').set(H).send({ username: 'victim', password: 'wrong-password' });
+      const r = await request(app).post('/api/auth/login').set(H).send({ username, password: 'wrong-password' });
       assert.equal(r.status, 401);
     }
-    const locked = await request(app).post('/api/auth/login').set(H).send({ username: 'victim', password: 'correct-horse-battery' });
+    const locked = await request(app).post('/api/auth/login').set(H).send({ username, password });
     assert.equal(locked.status, 423);
+    await Admin.updateOne({ username }, { $set: { lockUntil: null } });
+  });
+
+  test('only the admin from .env can sign in', async () => {
+    const wrongUser = await request(app).post('/api/auth/login').set(H).send({ username: 'helper', password: env.admin.password });
+    assert.equal(wrongUser.status, 401);
+
+    // A valid token for any other account in the database is refused.
+    const other = await Admin.create({ username: 'helper', name: 'helper user', role: 'staff' });
+    const cookie = (await request(app).post('/api/auth/login').set(H).send(env.admin)).headers['set-cookie'][0].split(';')[0];
+    const { cs } = jwt.decode(cookie.split('=')[1]);
+    const forged = jwt.sign({ sub: String(other._id), tv: 0, cs }, env.jwtSecret, { algorithm: 'HS256' });
+    assert.equal((await request(app).get('/api/auth/me').set('Cookie', `rms_session=${forged}`)).status, 401);
+  });
+
+  test('changing ADMIN_PASSWORD signs out existing sessions', async () => {
+    const original = env.admin.password;
+    try {
+      env.admin.password = 'a-brand-new-password';
+      assert.equal((await admin.get('/api/auth/me')).status, 401);
+    } finally {
+      env.admin.password = original;
+    }
+    assert.equal((await admin.get('/api/auth/me')).status, 200);
   });
 
   test('session cookie is httpOnly and SameSite=Strict', async () => {
-    const r = await request(app).post('/api/auth/login').set(H).send({ username: 'chief', password: 'correct-horse-battery' });
+    const r = await request(app).post('/api/auth/login').set(H).send(env.admin);
     const cookie = r.headers['set-cookie'][0];
     assert.match(cookie, /HttpOnly/);
     assert.match(cookie, /SameSite=Strict/);
@@ -229,15 +250,15 @@ describe('authentication', () => {
   });
 
   test('logout revokes the session server-side', async () => {
-    await createAdmin('temp', 'admin');
-    const agent = await login(app, 'temp');
-    const cookie = (await request(app).post('/api/auth/login').set(H).send({ username: 'temp', password: 'correct-horse-battery' }))
-      .headers['set-cookie'][0].split(';')[0];
+    const agent = await login(app);
+    const cookie = (await request(app).post('/api/auth/login').set(H).send(env.admin)).headers['set-cookie'][0].split(';')[0];
     assert.equal((await agent.get('/api/auth/me')).status, 200);
     assert.equal((await agent.post('/api/auth/logout').set(H)).status, 200);
     assert.equal((await agent.get('/api/auth/me')).status, 401);
     // A copy of the cookie taken before logout no longer works either.
     assert.equal((await request(app).get('/api/auth/me').set('Cookie', cookie)).status, 401);
+    // Logout signs the one admin out everywhere; sign the shared agent back in.
+    admin = await login(app);
   });
 });
 
@@ -259,11 +280,6 @@ describe('workflow', () => {
     assert.equal((await Registration.findById(id)).status, 'submitted');
   });
 
-  test('staff cannot confirm', async () => {
-    assert.equal((await act(staff, id, 'confirm')).status, 403);
-    assert.equal((await Registration.findById(id)).status, 'submitted');
-  });
-
   test('confirm from Submitted: one pass, one confirmation and one pass message, even when clicked twice', async () => {
     const before = mockOutbox.length;
     const [a, b] = await Promise.all([act(admin, id, 'confirm'), act(admin, id, 'confirm')]);
@@ -273,7 +289,7 @@ describe('workflow', () => {
     assert.equal(body.registration.status, 'confirmed');
     assert.equal(body.registration.passStatus, 'sent');
     assert.ok(body.registration.confirmedAt, 'confirmation time recorded');
-    assert.equal(body.registration.confirmedByName, 'chief user');
+    assert.equal(body.registration.confirmedByName, 'chief');
     assert.match(body.pass.passId, /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
     assert.equal(await EntryPass.countDocuments({ registration: id }), 1);
 
@@ -346,12 +362,12 @@ describe('workflow', () => {
     const code = qrPayload(pass.passId, pass.version);
     assert.deepEqual(parseQrPayload(code), { passId: pass.passId, version: 1, signed: true });
 
-    const good = await staff.post('/api/admin/passes/verify').set(H).send({ code });
+    const good = await admin.post('/api/admin/passes/verify').set(H).send({ code });
     assert.equal(good.body.valid, true);
     assert.equal(good.body.registration.name, 'Ravi Kumar');
 
     const forged = `${pass.passId}.1.${'x'.repeat(32)}`;
-    assert.equal((await staff.post('/api/admin/passes/verify').set(H).send({ code: forged })).body.reason, 'invalid_code');
+    assert.equal((await admin.post('/api/admin/passes/verify').set(H).send({ code: forged })).body.reason, 'invalid_code');
   });
 
 });

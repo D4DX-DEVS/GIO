@@ -28,6 +28,13 @@ const env = {
     .filter(Boolean),
   trustProxy: str('TRUST_PROXY'),
 
+  // The only admin account. Plain text, compared directly at sign-in
+  // (services/auth.js); the database keeps no password for it.
+  admin: {
+    username: str('ADMIN_USERNAME').toLowerCase(),
+    password: str('ADMIN_PASSWORD'),
+  },
+
   jwtSecret: str('JWT_SECRET'),
   sessionHours: int('SESSION_HOURS', 12),
   // Separate key so that rotating it invalidates every QR / image link
@@ -81,6 +88,8 @@ env.isProduction = env.nodeEnv === 'production';
 function assertConfig() {
   const missing = [];
   if (!env.mongoUri) missing.push('MONGODB_URI');
+  if (!env.admin.username) missing.push('ADMIN_USERNAME');
+  if (env.admin.password.length < 10) missing.push('ADMIN_PASSWORD (at least 10 characters)');
   if (env.jwtSecret.length < 32) missing.push('JWT_SECRET (at least 32 characters)');
   if (env.passSecret.length < 32) missing.push('PASS_SIGNING_SECRET (at least 32 characters)');
   if (env.dxing.mode === 'live') {

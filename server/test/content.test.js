@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
-const { start, stop, createAdmin, login, sample, image, jpegWithExif, request, env } = require('./helpers');
+const { start, stop, login, sample, image, jpegWithExif, request, env } = require('./helpers');
 const { createApp } = require('../src/app');
 const { Registration, EntryPass } = require('../src/models');
 const { mockOutbox } = require('../src/providers/dxing');
@@ -16,7 +16,6 @@ const store = require('../src/providers/assetStore');
 
 let app;
 let admin;
-let staff;
 const H = { 'X-Requested-With': 'rms' };
 
 const page = (over = {}) => ({
@@ -54,33 +53,20 @@ const upload = (agent, buffer, alt = 'A test image', extra = '') =>
 
 before(async () => {
   app = await start();
-  await createAdmin('editor', 'admin');
-  await createAdmin('gate', 'staff');
-  admin = await login(app, 'editor');
-  staff = await login(app, 'gate');
+  admin = await login(app);
 });
 
 after(stop);
 
 describe('access', () => {
-  test('signed-out users get 401, staff get 403, admins get in', async () => {
+  test('signed-out users get 401, admins get in', async () => {
     assert.equal((await request(app).get('/api/admin/website/settings')).status, 401);
-    assert.equal((await staff.get('/api/admin/website/settings')).status, 403);
-    assert.equal((await staff.get('/api/admin/website/items/programme')).status, 403);
-    assert.equal((await staff.get('/api/admin/website/assets')).status, 403);
-    assert.equal((await upload(staff, image(300, 300))).status, 403);
     assert.equal((await admin.get('/api/admin/website/settings')).status, 200);
   });
 
   test('writes need the CSRF header', async () => {
     const r = await admin.put('/api/admin/website/settings').send({ draft: page(), version: 0 });
     assert.equal(r.status, 403);
-  });
-
-  test('staff keep their registration permissions', async () => {
-    assert.equal((await staff.get('/api/admin/registrations')).status, 200);
-    const me = (await staff.get('/api/auth/me')).body.admin;
-    assert.ok(!me.permissions.includes('content'));
   });
 });
 
@@ -165,7 +151,6 @@ describe('page settings', () => {
     const preview = await admin.get('/api/admin/website/preview');
     assert.equal(preview.body.preview, true);
     assert.equal(preview.body.page.venue, 'Town Hall');
-    assert.equal((await staff.get('/api/admin/website/preview')).status, 403);
 
     // Discard goes back to the published copy.
     const discarded = await admin.post('/api/admin/website/settings/discard').set(H).send({ version: saved.body.version });
