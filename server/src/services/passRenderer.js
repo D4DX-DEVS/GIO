@@ -2,9 +2,16 @@
 // would arrive as a document the attendee has to open).
 //
 // No emoji: canvas has no emoji font on most servers.
-const { createCanvas, loadImage } = require('canvas');
+const path = require('path');
+const { createCanvas, loadImage, registerFont } = require('canvas');
 const QRCode = require('qrcode');
 const { qrPayload } = require('../utils/passTokens');
+
+// Linux hosts such as DigitalOcean App Platform have no Malayalam font, so
+// Malayalam names would print as empty boxes. Bundled (SIL OFL, see fonts/OFL.txt).
+const FONT_DIR = path.join(__dirname, '../../fonts');
+registerFont(path.join(FONT_DIR, 'NotoSansMalayalam-Regular.ttf'), { family: 'Noto Sans Malayalam' });
+registerFont(path.join(FONT_DIR, 'NotoSansMalayalam-Bold.ttf'), { family: 'Noto Sans Malayalam', weight: 'bold' });
 
 const W = 1080;
 // Base height. Passes for registrations from the new form grow by a row for

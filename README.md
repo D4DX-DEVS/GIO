@@ -20,6 +20,7 @@ This is a standalone application with its own database, configuration and admin 
 - [Entry passes](#entry-passes)
 - [Security](#security)
 - [Deployment](#deployment)
+  - [Deploying to DigitalOcean App Platform](#deploying-to-digitalocean-app-platform)
 - [Tests](#tests)
 - [API reference](#api-reference)
 
@@ -320,6 +321,81 @@ General set-up:
 5. Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` in the production `.env`.
 6. **`canvas` system packages.** On Linux, `canvas` needs Cairo and Pango, and the pass needs fonts. On Debian or Ubuntu: `apt install libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libjpeg62-turbo libgif7 librsvg2-2 fonts-noto-core`. Add `fonts-noto-ui-indic` or similar if names may be written in Indic scripts. Prebuilt binaries cover Windows and macOS.
 7. Make sure the reverse proxy forwards `/api/passes/*` publicly, because DXing must reach it, and accepts request bodies up to 5 MB on `/api/admin/website/assets` (image uploads).
+
+### Deploying to DigitalOcean App Platform
+
+App Platform builds this repository with its Node.js buildpack. Do not add a `Dockerfile` to the root: App Platform would switch to a Docker build.
+
+**How the build works.** The buildpack installs only the root `package.json`, which has no dependencies. Its `heroku-prebuild` script therefore installs `server/` (production dependencies only) and `client/` (including TypeScript and Vite, even when `NODE_ENV=production`). The buildpack then runs `npm run build`, which builds `client/dist`, and starts the app with `npm start`. `engines.node` in the root `package.json` pins Node.js 22.
+
+The entry pass needs Cairo, Pango and fonts. The buildpack's Ubuntu 22.04 image includes Cairo, Pango and Latin fonts, but no Malayalam font, so Noto Sans Malayalam is kept in `server/fonts/` and registered by `services/passRenderer.js`.
+
+**1. MongoDB Atlas.**
+
+- Create the cluster in AWS Mumbai (`ap-south-1`), the region closest to App Platform's Bangalore. The free M0 tier has no backups, so use a paid tier once real registrations come in.
+- Database Access: create a user with `readWrite` on `registration_system` only.
+- Network Access: App Platform has no fixed outbound IP by default. Either allow `0.0.0.0/0` (access still needs the database user's password, over TLS), or add a dedicated egress IP to the app and allow only that address.
+- Connection string: put the database name in the path, or the data goes to a database called `test`. URL-encode special characters in the password.
+  ```
+  mongodb+srv://USER:PASSWORD@CLUSTER.mongodb.net/registration_system?retryWrites=true&w=majority
+  ```
+
+**2. Component settings** (App > Settings > the web component):
+
+| Setting | Value |
+|---|---|
+| Source | `D4DX-DEVS/GIO`, the branch you deploy (`production`), autodeploy on |
+| Build command | Empty (the buildpack runs `npm run build`) |
+| Run command | `npm start` |
+| HTTP port | The same number as the `PORT` variable |
+| Health check | HTTP, path `/api/health` |
+| Instances | 1. The rate limits are kept in memory, per instance. |
+
+**3. Environment variables.** Set the secrets as encrypted, with scope Run time; the build does not need them.
+
+| Variable | Value |
+|---|---|
+| `NODE_ENV` | `production`. With `development`, cookies are sent without `Secure` and the rate limits are 30 times looser. |
+| `ASSET_STORAGE` | `gridfs`. Required in production (the server refuses to start without it). App Platform has no persistent disk. |
+| `MONGODB_URI` | The Atlas connection string from step 1 |
+| `PUBLIC_BASE_URL` | `${APP_URL}` (follows the primary domain), or `https://your-domain` |
+| `TRUST_PROXY` | `1`, then check it (step 6) |
+| `PORT` | The component's HTTP port |
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | The admin sign-in (password at least 10 characters) |
+| `JWT_SECRET`, `PASS_SIGNING_SECRET` | Two different values from `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. If you restore an existing database, keep its `PASS_SIGNING_SECRET`, or every issued QR code stops working. |
+| `DXING_MODE` | `live` |
+| `DXING_API_KEY`, `DXING_INSTANCE_ID` | From DXing |
+
+The other variables are optional (see [Configuration](#configuration-serverenv)). Keep a copy of the secrets outside DigitalOcean.
+
+Do not use `DXING_MODE=mock` while real people are registering. Mock marks every message as sent without sending it, and the acknowledgement is never sent again later.
+
+**4. First set-up.** In App > Console:
+
+```bash
+cd server
+npm run seed-site                 # dry run
+npm run seed-site -- --apply      # create the website draft, import the logo and poster
+```
+
+Review the draft under Website in the admin console, then publish it.
+
+**5. Domain.** Add the conference domain under Settings > Domains and create the DNS records App Platform shows.
+
+**6. Check rate limiting.** The limits count requests per client IP. If the app saw App Platform's proxy address instead, every visitor would share one limit, and registration would stop after 30 submissions an hour. Run this twice from your computer:
+
+```bash
+curl -s -D - -o /dev/null -X POST https://YOUR-DOMAIN/api/auth/login \
+  -H 'X-Requested-With: rms' -H 'Content-Type: application/json' -d '{}' | grep -i '^ratelimit:'
+```
+
+`remaining` should go 19, then 18. Then run it once from another network, such as a phone hotspot. It should show 19 again. If it shows 17, set `TRUST_PROXY=2` and check again. This request cannot lock the admin account, because it sends no username.
+
+**7. Check WhatsApp and the pass.** Register with your own WhatsApp number (try a name in Malayalam), then confirm the registration in `/admin`. Check that the acknowledgement, the confirmation and the pass image arrive, and that the text on the pass looks right.
+
+**Deploys.** Every push to the deployed branch builds and deploys. The new instance takes traffic once `/api/health` answers, which happens after the database connects. The old instance then gets `SIGTERM` and finishes its open requests before it exits.
+
+**Backups.** Use the backups of your Atlas tier, and also run `mongodump --uri "<MONGODB_URI>"` before the event and before any deploy that changes data. Images are stored in the same database (GridFS), so the dump includes them.
 
 ## Tests
 
