@@ -23,6 +23,10 @@ import { DownloadPassLink, PassImage, PassViewer, useRegistrationActions, useRep
 import type { ActionKind } from '../../components/RegistrationActions';
 import { useLayout } from './AdminLayout';
 
+// Registrations from the original form have no gender, place, WhatsApp
+// number or children.
+const NOT_RECORDED = 'Not recorded';
+
 const MSG_STATUS = {
   accepted: { label: 'Accepted by DXing', cls: 'text-emerald-700 bg-emerald-50', Icon: CheckCircle2 },
   failed: { label: 'Failed', cls: 'text-red-700 bg-red-50', Icon: XCircle },
@@ -45,10 +49,10 @@ const ACTION_BUTTON: Record<ActionKind, { label: string; icon: ComponentType<{ c
 
 function Card({ title, icon: Icon, children, aside }: { title: string; icon: ComponentType<{ className?: string }>; children: ReactNode; aside?: ReactNode }) {
   return (
-    <section className="card p-5">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2 font-semibold text-slate-900">
-          <Icon className="h-[18px] w-[18px] text-slate-400" /> {title}
+    <section className="card p-5 sm:p-6">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-200/70 pb-3.5">
+        <h2 className="display flex items-center gap-2.5 text-[22px] leading-tight">
+          <Icon className="h-[18px] w-[18px] text-brand-400" /> {title}
         </h2>
         {aside}
       </div>
@@ -158,7 +162,7 @@ export default function RegistrationDetail() {
           <div className="flex min-w-0 items-center gap-4">
             <Avatar name={r.name} className="h-14 w-14 text-lg" />
             <div className="min-w-0">
-              <h1 className="break-words text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">{r.name}</h1>
+              <h1 className="display break-words text-[30px] leading-[1.1] sm:text-[38px]">{r.name}</h1>
               <p className="mt-0.5 text-sm text-slate-500">
                 <span className="font-mono font-medium text-slate-700">{r.regNo}</span> · Registered {formatDateTime(r.createdAt)}
               </p>
@@ -200,12 +204,12 @@ export default function RegistrationDetail() {
         </ol>
 
         {r.status === 'submitted' && (
-          <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-inset ring-amber-200/70">
             Awaiting confirmation. {detail.permissions.approve ? 'Review the details, then confirm the registration.' : 'An admin needs to confirm this registration.'}
           </p>
         )}
         {r.passStatus === 'send_failed' && (
-          <p className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">
+          <p className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800 ring-1 ring-inset ring-red-200/70">
             The entry pass was generated and saved, but WhatsApp sending failed. See the messages below for the reason, then retry.
           </p>
         )}
@@ -218,11 +222,22 @@ export default function RegistrationDetail() {
               {[
                 ['Name', r.name],
                 ['Age', String(r.age)],
-                ['Mobile', r.mobileDisplay],
+                ['Gender', r.gender ?? NOT_RECORDED],
+                ['Phone number', r.mobileDisplay],
+                ['WhatsApp number', r.whatsappDisplay ? (r.whatsapp === r.mobile ? `${r.whatsappDisplay} (same as phone)` : r.whatsappDisplay) : `${NOT_RECORDED}; messages go to the phone number`],
                 ['Email', r.email],
+                ['Place', r.place ?? NOT_RECORDED],
                 ['District', r.district],
                 ['Area', r.area],
                 ['Unit', r.unit],
+                [
+                  'Accompanying children',
+                  r.childrenCount === null
+                    ? NOT_RECORDED
+                    : r.childrenCount === 0
+                      ? 'None'
+                      : `${r.childrenCount}${r.childAges ? ` (ages ${r.childAges.join(', ')})` : ''}`,
+                ],
                 ['Registration no.', r.regNo],
                 ['Status', STATUS_LABEL[r.status] ?? r.status],
                 ['Confirmed', r.confirmedAt ? `${formatDateTime(r.confirmedAt)}${r.confirmedByName ? ` by ${r.confirmedByName}` : ''}` : 'Not yet'],
@@ -272,10 +287,10 @@ export default function RegistrationDetail() {
           </Card>
 
           <Card title="History" icon={History}>
-            <ol className="relative space-y-4 border-l-2 border-slate-100 pl-5">
+            <ol className="relative space-y-4 border-l-2 border-slate-200/70 pl-5">
               {[...r.statusHistory].reverse().map((h, i) => (
                 <li key={i} className="relative text-sm">
-                  <span className="absolute -left-[27px] top-0.5 h-3 w-3 rounded-full border-2 border-white bg-brand-500 ring-2 ring-brand-100" />
+                  <span className="absolute -left-[27px] top-0.5 h-3 w-3 rounded-full border-2 border-white bg-brand-600 ring-2 ring-brand-100" />
                   <p className="font-medium text-slate-900">{STATUS_LABEL[h.to] ?? h.to}</p>
                   <p className="text-xs text-slate-500">
                     {formatDateTime(h.at)} · {h.byName}
@@ -321,12 +336,12 @@ export default function RegistrationDetail() {
                   <Button variant="secondary" onClick={() => setViewing(true)}>
                     <Expand className="h-4 w-4" aria-hidden /> View
                   </Button>
-                  <DownloadPassLink id={r.id} passId={detail.pass.passId} className="min-h-[44px] rounded-xl border border-slate-200 bg-white text-sm text-slate-700 shadow-sm hover:bg-slate-50" />
+                  <DownloadPassLink id={r.id} passId={detail.pass.passId} className="btn-line min-h-[44px] rounded-full text-sm" />
                 </div>
               </>
             ) : (
-              <div className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center">
-                <Ticket className="mx-auto h-7 w-7 text-slate-300" aria-hidden />
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
+                <Ticket className="mx-auto h-7 w-7 text-brand-300" aria-hidden />
                 <p className="mt-2 text-sm text-slate-500">
                   {r.status === 'confirmed'
                     ? 'No pass yet. Generation failed; use "Generate entry pass".'
@@ -340,7 +355,7 @@ export default function RegistrationDetail() {
 
       {/* Sticky action bar on phones */}
       {actions.length > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur md:hidden">
+        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-slate-50/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur md:hidden">
           <div className="mx-auto flex max-w-5xl gap-2">{actionButtons(true)}</div>
         </div>
       )}
@@ -356,7 +371,7 @@ function BackLink() {
   return (
     <Link
       to={back?.startsWith('/admin') ? back : '/admin'}
-      className="inline-flex items-center gap-1.5 rounded-lg py-1 text-sm font-semibold text-slate-600 transition hover:text-brand-700"
+      className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg py-1 text-sm font-semibold text-slate-600 transition hover:text-brand-600"
     >
       <ArrowLeft className="h-4 w-4" aria-hidden /> All registrations
     </Link>

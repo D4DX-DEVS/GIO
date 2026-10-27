@@ -1,31 +1,49 @@
 /** @type {import('tailwindcss').Config} */
+// One palette for the whole app, taken from the public website tokens in
+// site.css: wine/maroon for actions, warm ivory and beige neutrals, muted rose.
+// `slate` is redefined as the warm neutral scale so every admin screen
+// follows the same theme without per-class changes.
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
         brand: {
-          50: '#effaf6',
-          100: '#d8f3e9',
-          200: '#b3e6d4',
-          300: '#7fd2b9',
-          400: '#48b799',
-          500: '#249c7f',
-          600: '#167e67',
-          700: '#136554',
-          800: '#125145',
-          900: '#10433a',
-          950: '#072620',
+          50: '#f7ebe8',
+          100: '#f1e0de',
+          200: '#e3c6c4',
+          300: '#c48b93',
+          400: '#b06a76',
+          500: '#9a4655',
+          600: '#5a0b16',
+          700: '#701526',
+          800: '#4a0912',
+          900: '#3b0911',
+          950: '#24070c',
+        },
+        slate: {
+          50: '#faf6f0',
+          100: '#f3ebe0',
+          200: '#e5d9cb',
+          300: '#cdb9a5',
+          400: '#a8968f',
+          500: '#685a59',
+          600: '#524546',
+          700: '#3b2a2c',
+          800: '#2b2326',
+          900: '#241417',
+          950: '#1a0e10',
         },
       },
       fontFamily: {
-        sans: ['"Inter Variable"', 'Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Noto Sans', 'sans-serif'],
+        sans: ['"Hanken Grotesk Variable"', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Noto Sans', 'sans-serif'],
+        serif: ['"Instrument Serif"', '"Iowan Old Style"', 'Georgia', 'serif'],
       },
       boxShadow: {
-        soft: '0 1px 2px rgb(15 23 42 / 0.04), 0 4px 16px -4px rgb(15 23 42 / 0.08)',
-        lift: '0 2px 4px rgb(15 23 42 / 0.04), 0 16px 40px -12px rgb(15 23 42 / 0.18)',
-        panel: '0 1px 2px rgb(16 24 40 / 0.04), 0 1px 3px rgb(16 24 40 / 0.06)',
-        glow: '0 8px 24px -8px rgb(22 126 103 / 0.55)',
+        soft: '0 1px 2px rgb(60 10 18 / 0.04), 0 4px 16px -4px rgb(60 10 18 / 0.08)',
+        lift: '0 2px 4px rgb(60 10 18 / 0.04), 0 18px 44px -14px rgb(60 10 18 / 0.22)',
+        panel: '0 1px 2px rgb(60 10 18 / 0.03), 0 1px 3px rgb(60 10 18 / 0.05)',
+        glow: '0 10px 24px -12px rgb(90 11 22 / 0.6)',
       },
       keyframes: {
         'fade-in': { from: { opacity: '0' }, to: { opacity: '1' } },
@@ -35,7 +53,7 @@ export default {
         'slide-in': { from: { transform: 'translateX(-100%)' }, to: { transform: 'none' } },
         shimmer: { '100%': { transform: 'translateX(100%)' } },
         progress: { from: { transform: 'translateX(-100%)' }, to: { transform: 'translateX(300%)' } },
-        flash: { '0%, 60%': { backgroundColor: 'rgb(209 250 229 / 0.9)' }, '100%': { backgroundColor: 'transparent' } },
+        flash: { '0%, 60%': { backgroundColor: 'rgb(241 224 222 / 0.9)' }, '100%': { backgroundColor: 'transparent' } },
       },
       animation: {
         'fade-in': 'fade-in 150ms ease-out',

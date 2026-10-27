@@ -4,11 +4,14 @@
 // No emoji: canvas has no emoji font on most servers.
 const { createCanvas, loadImage } = require('canvas');
 const QRCode = require('qrcode');
-const { env } = require('../config/env');
 const { qrPayload } = require('../utils/passTokens');
 
 const W = 1080;
-const H = 1660;
+// Base height. Passes for registrations from the new form grow by a row for
+// Place and a band for accompanying children; older passes keep this size.
+const BASE_H = 1660;
+const PLACE_ROW_H = 100;
+const CHILDREN_BAND_H = 110;
 const FONT = '"Segoe UI", "Helvetica Neue", Arial, "Noto Sans", "Noto Sans Malayalam", sans-serif';
 const MONO = '"Consolas", "Courier New", monospace';
 
@@ -59,10 +62,16 @@ function wrap(ctx, text, maxWidth, maxLines) {
   return lines.slice(0, maxLines);
 }
 
-async function renderPass(pass) {
+/**
+ * @param pass  EntryPass document (holder details frozen at issue)
+ * @param event current event details { name, date, venue } (services/site.js)
+ */
+async function renderPass(pass, event) {
+  const h = pass.holder || {};
+  const children = typeof h.childrenCount === 'number' ? h.childrenCount : null;
+  const H = BASE_H + (h.place ? PLACE_ROW_H : 0) + (children > 0 ? CHILDREN_BAND_H : 0);
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
-  const h = pass.holder || {};
 
   ctx.fillStyle = C.bg;
   ctx.fillRect(0, 0, W, H);
@@ -101,10 +110,10 @@ async function renderPass(pass) {
 
   ctx.fillStyle = '#ffffff';
   ctx.font = `700 54px ${FONT}`;
-  const titleLines = wrap(ctx, env.event.name.toUpperCase(), cw - 100, 2);
+  const titleLines = wrap(ctx, String(event.name || '').toUpperCase(), cw - 100, 2);
   titleLines.forEach((l, i) => ctx.fillText(l, W / 2, cy + 160 + i * 64));
 
-  const meta = [env.event.date, env.event.venue].filter(Boolean).join('  |  ');
+  const meta = [event.date, event.venue].filter(Boolean).join('  |  ');
   if (meta) {
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     fitText(ctx, meta, 500, 28, 18, cw - 100);
@@ -144,6 +153,31 @@ async function renderPass(pass) {
   });
   y += 220;
 
+  if (h.place) {
+    ctx.fillStyle = C.muted;
+    ctx.font = `500 22px ${FONT}`;
+    ctx.fillText('PLACE', W / 2, y + 10);
+    ctx.fillStyle = C.ink;
+    fitText(ctx, h.place, 600, 32, 18, cw - 100);
+    ctx.fillText(h.place, W / 2, y + 52);
+    y += PLACE_ROW_H;
+  }
+
+  // Number only; children's ages are never printed.
+  if (children > 0) {
+    const bandY = y - 10;
+    roundRect(ctx, cx + 50, bandY, cw - 100, 84, 18);
+    ctx.fillStyle = '#fff7db';
+    ctx.fill();
+    ctx.strokeStyle = C.accent;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = C.ink;
+    ctx.font = `700 34px ${FONT}`;
+    ctx.fillText(`Accompanying children: ${children}`, W / 2, bandY + 54);
+    y += CHILDREN_BAND_H;
+  }
+
   ctx.strokeStyle = C.line;
   ctx.lineWidth = 2;
   ctx.setLineDash([12, 10]);
@@ -178,7 +212,12 @@ async function renderPass(pass) {
 
   ctx.fillStyle = C.muted;
   ctx.font = `400 22px ${FONT}`;
-  ctx.fillText('Show this QR code at the entrance. Valid for one person only.', W / 2, cy + ch - 40);
+  const footer =
+    children > 0
+      ? `Show this QR code at the entrance. Valid for the holder and ${children} accompanying ${children === 1 ? 'child' : 'children'}.`
+      : 'Show this QR code at the entrance. Valid for one person only.';
+  fitText(ctx, footer, 400, 22, 16, cw - 60);
+  ctx.fillText(footer, W / 2, cy + ch - 40);
 
   return canvas.toBuffer('image/png');
 }

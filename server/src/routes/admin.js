@@ -9,6 +9,7 @@ const registrations = require('../services/registrations');
 const passes = require('../services/passes');
 const { formatForDisplay } = require('../utils/phone');
 const { districts: districtList } = require('../config/districts');
+const { recipientOf } = require('../services/notifications');
 
 const router = express.Router();
 router.use(requireCsrfHeader, requireAuth);
@@ -34,6 +35,15 @@ function listItem(r) {
     district: r.district,
     area: r.area,
     unit: r.unit,
+    // Fields from the new form. null = not recorded (older registrations).
+    formVersion: r.formVersion ?? 1,
+    gender: r.gender ?? null,
+    place: r.place ?? null,
+    whatsapp: r.whatsapp ?? null,
+    whatsappDisplay: r.whatsapp ? formatForDisplay(r.whatsapp) : null,
+    // WhatsApp messages go to this number (see services/notifications.js).
+    messagesTo: formatForDisplay(recipientOf(r)),
+    childrenCount: Array.isArray(r.children) ? r.children.length : null,
     status: r.status,
     statusChangedAt: r.statusChangedAt,
     confirmedAt: r.confirmedAt || null,
@@ -73,7 +83,7 @@ function notificationView(n) {
   };
 }
 
-async function detail(registrationId) {
+async function detail(registrationId, admin) {
   const [registration, pass, messages] = await Promise.all([
     Registration.findById(registrationId),
     EntryPass.findOne({ registration: registrationId }),
@@ -81,14 +91,20 @@ async function detail(registrationId) {
   ]);
   if (!registration) throw new HttpError(404, 'Registration not found.');
   return {
-    registration: { ...listItem(registration), statusHistory: registration.statusHistory, updatedAt: registration.updatedAt },
+    registration: {
+      ...listItem(registration),
+      // Children's ages are for admins only; they are never printed on the pass.
+      childAges: can(admin, 'approve') && Array.isArray(registration.children) ? registration.children.map((c) => c.age) : null,
+      statusHistory: registration.statusHistory,
+      updatedAt: registration.updatedAt,
+    },
     pass: passView(pass, registration._id),
     notifications: messages.map(notificationView),
   };
 }
 
 function actionResponse(req, result) {
-  return detail(result.registration._id).then((d) => ({
+  return detail(result.registration._id, req.admin).then((d) => ({
     ...d,
     messages: result.messages || [],
     passError: result.passError || null,
@@ -124,9 +140,9 @@ router.get(
     }
     if (q.search) {
       const rx = new RegExp(escapeRegex(q.search), 'i');
-      const or = [{ name: rx }, { email: rx }, { regNo: rx }, { passId: rx }, { area: rx }, { unit: rx }];
+      const or = [{ name: rx }, { email: rx }, { regNo: rx }, { passId: rx }, { area: rx }, { unit: rx }, { place: rx }];
       const digits = q.search.replace(/\D/g, '');
-      if (digits.length >= 3) or.push({ mobile: new RegExp(escapeRegex(digits)) });
+      if (digits.length >= 3) or.push({ mobile: new RegExp(escapeRegex(digits)) }, { whatsapp: new RegExp(escapeRegex(digits)) });
       filter.$or = or;
     }
 
@@ -216,7 +232,7 @@ router.get(
   requirePermission('view'),
   asyncHandler(async (req, res) => {
     checkId(req.params.id);
-    res.json({ ...(await detail(req.params.id)), permissions: permissionsFor(req.admin) });
+    res.json({ ...(await detail(req.params.id, req.admin)), permissions: permissionsFor(req.admin) });
   })
 );
 

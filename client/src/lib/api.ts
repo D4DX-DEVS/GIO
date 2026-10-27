@@ -13,7 +13,7 @@ export class ApiError extends Error {
 }
 
 type Options = {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   body?: unknown;
   headers?: Record<string, string>;
   signal?: AbortSignal;
@@ -48,6 +48,37 @@ export async function api<T>(path: string, opts: Options = {}): Promise<T> {
     const message =
       data.error ||
       (res.status === 429 ? 'Too many requests. Please wait a moment and try again.' : 'Something went wrong. Please try again.');
+    throw new ApiError(res.status, message, data.fields, data.code);
+  }
+  return data as T;
+}
+
+/**
+ * Sends a file as the raw request body (image upload). Same session cookie
+ * and CSRF header as every other admin request; the server decides the type
+ * from the file's bytes.
+ */
+export async function uploadFile<T>(path: string, file: Blob, fileName = ''): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'X-Requested-With': 'rms',
+        'Content-Type': 'application/octet-stream',
+        'X-File-Name': encodeURIComponent(fileName.slice(0, 200)),
+      },
+      credentials: 'same-origin',
+      body: file,
+    });
+  } catch {
+    throw new ApiError(0, 'Could not reach the server. Check your internet connection and try again.');
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401 && onUnauthorized) onUnauthorized();
+    const message = data.error || (res.status === 413 ? 'The image is larger than 5 MB.' : 'The upload failed. Please try again.');
     throw new ApiError(res.status, message, data.fields, data.code);
   }
   return data as T;

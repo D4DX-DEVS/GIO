@@ -4,7 +4,16 @@ import { Link, Outlet, useLocation, useOutletContext } from 'react-router-dom';
 import {
   BadgeCheck,
   Bell,
+  CalendarClock,
   ChevronDown,
+  FileText,
+  Globe,
+  HelpCircle,
+  ImageIcon,
+  Images,
+  LayoutGrid,
+  Megaphone,
+  Mic,
   ChevronRight,
   ExternalLink,
   Hourglass,
@@ -12,7 +21,6 @@ import {
   LogOut,
   Menu,
   SendHorizontal,
-  ShieldCheck,
   TriangleAlert,
   X,
 } from 'lucide-react';
@@ -34,6 +42,18 @@ type NavItem = {
   tone?: 'warn' | 'danger';
 };
 
+// Website pages are matched by path rather than by list query.
+const WEBSITE_NAV: NavItem[] = [
+  { label: 'Overview', to: '/admin/website/overview', icon: LayoutGrid, match: null },
+  { label: 'Page content', to: '/admin/website', icon: FileText, match: null },
+  { label: 'Programme', to: '/admin/website/programme', icon: CalendarClock, match: null },
+  { label: 'Speakers', to: '/admin/website/speakers', icon: Mic, match: null },
+  { label: 'Announcements', to: '/admin/website/announcements', icon: Megaphone, match: null },
+  { label: 'FAQs', to: '/admin/website/faqs', icon: HelpCircle, match: null },
+  { label: 'Gallery', to: '/admin/website/gallery', icon: ImageIcon, match: null },
+  { label: 'Images', to: '/admin/website/images', icon: Images, match: null },
+];
+
 const NAV: Array<{ group: string; items: NavItem[] }> = [
   {
     group: 'Overview',
@@ -51,6 +71,7 @@ const NAV: Array<{ group: string; items: NavItem[] }> = [
 ];
 
 function isActive(item: NavItem, pathname: string, search: string) {
+  if (item.to.startsWith('/admin/website')) return pathname.replace(/\/$/, '') === item.to;
   if (pathname !== '/admin') return item.match === null && pathname.startsWith('/admin/registrations');
   const params = new URLSearchParams(search);
   const keys = ['status', 'passStatus'];
@@ -60,11 +81,13 @@ function isActive(item: NavItem, pathname: string, search: string) {
 
 function Nav({ stats, onNavigate }: { stats: Stats | null; onNavigate?: () => void }) {
   const { pathname, search } = useLocation();
+  const { admin } = useAuth();
+  const groups = admin?.permissions.includes('content') ? [...NAV, { group: 'Website', items: WEBSITE_NAV }] : NAV;
   return (
     <nav aria-label="Main" className="space-y-6">
-      {NAV.map(({ group, items }) => (
+      {groups.map(({ group, items }) => (
         <div key={group}>
-          <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-brand-200/50">{group}</p>
+          <p className="px-3 pb-2 text-[10.5px] font-semibold uppercase tracking-[0.18em] text-slate-400">{group}</p>
           <div className="space-y-0.5">
             {items.map((item) => {
               const active = isActive(item, pathname, search);
@@ -76,18 +99,18 @@ function Nav({ stats, onNavigate }: { stats: Stats | null; onNavigate?: () => vo
                   onClick={onNavigate}
                   aria-current={active ? 'page' : undefined}
                   className={cx(
-                    'group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition duration-150',
-                    active ? 'bg-white/[0.09] text-white' : 'text-brand-100/70 hover:bg-white/[0.05] hover:text-white'
+                    'group relative flex min-h-[42px] items-center gap-3 rounded-lg px-3 py-2 text-sm transition duration-150',
+                    active ? 'bg-brand-50 font-semibold text-brand-700' : 'font-medium text-slate-600 hover:bg-slate-100/70 hover:text-slate-900'
                   )}
                 >
-                  {active && <span aria-hidden className="absolute inset-y-2 left-0 w-[3px] rounded-r-full bg-brand-400" />}
-                  <item.icon className={cx('h-[18px] w-[18px] shrink-0 transition-colors', active ? 'text-brand-300' : 'text-brand-200/50 group-hover:text-brand-200')} />
+                  {active && <span aria-hidden className="absolute inset-y-2 left-0 w-[3px] rounded-r-full bg-brand-600" />}
+                  <item.icon className={cx('h-[18px] w-[18px] shrink-0 transition-colors', active ? 'text-brand-600' : 'text-slate-400 group-hover:text-slate-600')} />
                   <span className="flex-1 truncate">{item.label}</span>
                   {n > 0 && (
                     <span
                       className={cx(
                         'min-w-[1.5rem] rounded-full px-1.5 py-0.5 text-center text-[11px] font-bold tabular-nums',
-                        item.tone === 'danger' ? 'bg-red-500 text-white' : 'bg-amber-400 text-amber-950'
+                        item.tone === 'danger' ? 'bg-red-600 text-white' : 'bg-amber-100 text-amber-900 ring-1 ring-inset ring-amber-200'
                       )}
                     >
                       {n}
@@ -105,13 +128,11 @@ function Nav({ stats, onNavigate }: { stats: Stats | null; onNavigate?: () => vo
 
 function Brand({ onNavigate }: { onNavigate?: () => void }) {
   return (
-    <Link to="/admin" onClick={onNavigate} className="flex items-center gap-3">
-      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-white shadow-glow">
-        <ShieldCheck className="h-5 w-5" aria-hidden />
-      </span>
-      <span className="leading-tight">
-        <span className="block text-[15px] font-bold tracking-tight text-white">Registration Desk</span>
-        <span className="block text-[11px] font-medium text-brand-200/60">Admin console</span>
+    <Link to="/admin" onClick={onNavigate} className="flex items-center gap-3 rounded-lg" aria-label="GIO Keralam admin console, dashboard">
+      <img src="/brand/gio-logo-maroon.png" alt="" width={600} height={441} className="h-10 w-auto" />
+      <span className="border-l border-slate-200 pl-3 leading-tight">
+        <span className="block font-serif text-[19px] leading-none text-slate-900">Conference</span>
+        <span className="mt-1 block text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-500">Admin console</span>
       </span>
     </Link>
   );
@@ -123,18 +144,18 @@ function SidebarBody({ stats, onNavigate }: { stats: Stats | null; onNavigate?: 
       <div className="flex-1 overflow-y-auto px-3 py-5">
         <Nav stats={stats} onNavigate={onNavigate} />
       </div>
-      <div className="p-3">
+      <div className="border-t border-slate-200/70 p-3">
         <a
           href="/"
           target="_blank"
           rel="noreferrer"
-          className="group block rounded-2xl bg-gradient-to-br from-white/[0.08] to-white/[0.02] p-4 ring-1 ring-inset ring-white/10 transition hover:ring-white/20"
+          className="group block rounded-xl border border-slate-200 bg-slate-50 p-4 transition hover:border-brand-200 hover:bg-brand-50/60"
         >
-          <span className="flex items-center justify-between text-sm font-semibold text-white">
-            Public registration form
-            <ExternalLink className="h-4 w-4 text-brand-300 transition group-hover:translate-x-0.5" aria-hidden />
+          <span className="flex items-center justify-between text-sm font-semibold text-slate-900">
+            Conference website
+            <ExternalLink className="h-4 w-4 text-brand-600 transition group-hover:translate-x-0.5" aria-hidden />
           </span>
-          <span className="mt-1 block text-xs text-brand-100/60">Open the form people use to register.</span>
+          <span className="mt-1 block text-xs text-slate-500">Open the public page. The form is at /register.</span>
         </a>
       </div>
     </>
@@ -142,6 +163,14 @@ function SidebarBody({ stats, onNavigate }: { stats: Stats | null; onNavigate?: 
 }
 
 const PAGE_TITLES: Array<[RegExp, string, string]> = [
+  [/^\/admin\/website\/overview/, 'Website overview', 'Every landing page section at a glance'],
+  [/^\/admin\/website\/?$/, 'Page content', 'Landing page, event details and registration form rules'],
+  [/^\/admin\/website\/programme/, 'Programme', 'Sessions and breaks'],
+  [/^\/admin\/website\/speakers/, 'Speakers', 'Conference speakers'],
+  [/^\/admin\/website\/announcements/, 'Announcements', 'News on the website'],
+  [/^\/admin\/website\/faqs/, 'FAQs', 'Questions and answers'],
+  [/^\/admin\/website\/gallery/, 'Gallery', 'Gallery images'],
+  [/^\/admin\/website\/images/, 'Images', 'Image library'],
   [/^\/admin\/registrations\//, 'Registration details', 'Review, confirm and manage the entry pass'],
   [/^\/admin\/?$/, 'Dashboard', 'Registrations, confirmations and entry passes'],
 ];
@@ -195,13 +224,16 @@ function ProfileMenu({ onLogout }: { onLogout: () => void }) {
               <p className="truncate text-sm font-semibold text-slate-900">{admin.name}</p>
               <p className="truncate text-xs text-slate-500">@{admin.username}</p>
             </div>
-            <span className="ml-auto rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold capitalize text-brand-800">{admin.role}</span>
+            <span className="ml-auto rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-semibold capitalize text-brand-700 ring-1 ring-inset ring-brand-100">{admin.role}</span>
           </div>
           <div className="p-1.5">
             <Link role="menuitem" to="/admin" className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
               <LayoutDashboard className="h-4 w-4 text-slate-400" aria-hidden /> Dashboard
             </Link>
             <a role="menuitem" href="/" target="_blank" rel="noreferrer" className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
+              <Globe className="h-4 w-4 text-slate-400" aria-hidden /> Conference website
+            </a>
+            <a role="menuitem" href="/register" target="_blank" rel="noreferrer" className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
               <ExternalLink className="h-4 w-4 text-slate-400" aria-hidden /> Registration form
             </a>
           </div>
@@ -254,16 +286,16 @@ export default function AdminLayout() {
   const [, title, subtitle] = PAGE_TITLES.find(([rx]) => rx.test(location.pathname)) ?? [null, 'Admin', ''];
   const alerts = stats ? stats.passSendFailed : 0;
   const onDetail = location.pathname.startsWith('/admin/registrations/');
+  const onWebsite = location.pathname.startsWith('/admin/website');
 
   return (
-    <div className="min-h-dvh bg-slate-100/70">
+    <div className="min-h-dvh bg-slate-50">
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[17rem] flex-col bg-brand-950 lg:flex">
-        <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(30rem_20rem_at_0%_0%,theme(colors.brand.700/35%),transparent_70%)]" />
-        <div className="relative flex h-[4.5rem] items-center px-5">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[17rem] flex-col border-r border-slate-200 bg-white lg:flex">
+        <div className="flex h-[4.5rem] shrink-0 items-center border-b border-slate-200/70 px-5">
           <Brand />
         </div>
-        <div className="relative flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col">
           <SidebarBody stats={stats} />
         </div>
       </aside>
@@ -271,15 +303,15 @@ export default function AdminLayout() {
       {/* Mobile / tablet drawer */}
       {drawer && (
         <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
-          <div className="absolute inset-0 animate-fade-in bg-slate-950/50 backdrop-blur-[2px]" onClick={() => setDrawer(false)} />
-          <div className="absolute inset-y-0 left-0 flex w-[min(18rem,85vw)] animate-slide-in flex-col bg-brand-950 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-lift">
-            <div className="flex h-16 items-center justify-between px-4">
+          <div className="absolute inset-0 animate-fade-in bg-slate-950/45 backdrop-blur-[2px]" onClick={() => setDrawer(false)} />
+          <div className="absolute inset-y-0 left-0 flex w-[min(18rem,85vw)] animate-slide-in flex-col bg-white pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-lift">
+            <div className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200/70 px-4">
               <Brand onNavigate={() => setDrawer(false)} />
               <button
                 type="button"
                 onClick={() => setDrawer(false)}
                 aria-label="Close menu"
-                className="rounded-lg p-2 text-brand-100/70 transition hover:bg-white/10 hover:text-white"
+                className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -291,7 +323,7 @@ export default function AdminLayout() {
 
       <div className="lg:pl-[17rem]">
         {/* Header */}
-        <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-white/85 pt-[env(safe-area-inset-top)] backdrop-blur-md">
+        <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-slate-50/90 pt-[env(safe-area-inset-top)] backdrop-blur-md">
           <div className="mx-auto flex h-16 max-w-[90rem] items-center gap-3 px-3 sm:px-6 lg:h-[4.5rem] lg:px-8">
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setDrawer(true)} aria-label="Open menu" aria-expanded={drawer}>
               <Menu className="h-5 w-5" />
@@ -302,7 +334,15 @@ export default function AdminLayout() {
                   Admin
                 </Link>
                 <ChevronRight className="h-3 w-3" aria-hidden />
-                {onDetail ? (
+                {onWebsite ? (
+                  <>
+                    <Link to="/admin/website" className="hover:text-brand-700">
+                      Website
+                    </Link>
+                    <ChevronRight className="h-3 w-3" aria-hidden />
+                    <span className="text-slate-500">{title}</span>
+                  </>
+                ) : onDetail ? (
                   <>
                     <Link to="/admin" className="hover:text-brand-700">
                       Registrations
@@ -314,7 +354,7 @@ export default function AdminLayout() {
                   <span className="text-slate-500">Dashboard</span>
                 )}
               </p>
-              <h1 className="truncate text-lg font-bold tracking-tight text-slate-900 sm:text-xl">{title}</h1>
+              <h1 className="display truncate text-[24px] leading-tight sm:text-[28px]">{title}</h1>
               <p className="sr-only">{subtitle}</p>
             </div>
             <Link

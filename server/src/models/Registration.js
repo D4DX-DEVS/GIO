@@ -28,6 +28,19 @@ const registrationSchema = new mongoose.Schema(
     area: { type: String, required: true, trim: true, maxlength: 100 },
     unit: { type: String, required: true, trim: true, maxlength: 100 },
 
+    // Added with form version 2. All optional so records saved by the
+    // original form stay valid; a missing value means "not recorded".
+    formVersion: { type: Number, default: undefined },
+    gender: { type: String, trim: true, maxlength: 30, default: undefined },
+    place: { type: String, trim: true, maxlength: 100, default: undefined },
+    // E.164. WhatsApp messages go here; when absent (older records) they go
+    // to `mobile`, as before.
+    whatsapp: { type: String, default: undefined },
+    // One entry per accompanying child. `default: undefined` keeps older
+    // records without the field, so they read as "not recorded" rather than
+    // "0 children".
+    children: { type: [new mongoose.Schema({ age: { type: Number, min: 0, max: 25 } }, { _id: false })], default: undefined },
+
     status: { type: String, enum: STATUSES, default: STATUS.SUBMITTED, index: true },
     statusChangedAt: { type: Date, default: Date.now },
     statusHistory: { type: [historySchema], default: [] },

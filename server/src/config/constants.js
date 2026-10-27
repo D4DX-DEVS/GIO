@@ -22,15 +22,37 @@ const TRANSITIONS = Object.freeze({
 
 const ROLES = Object.freeze({ ADMIN: 'admin', STAFF: 'staff' });
 
-// admin: full control. staff: can view registrations and verify passes at
-// the gate, but cannot confirm registrations or send passes.
+// admin: full control, including the conference website (content).
+// staff: can view registrations and verify passes at the gate, but cannot
+// confirm registrations, send passes or edit the website.
 const ROLE_PERMISSIONS = Object.freeze({
-  admin: ['view', 'approve', 'send', 'gate'],
+  admin: ['view', 'approve', 'send', 'gate', 'content'],
   staff: ['view', 'gate'],
 });
 
 const AGE_MIN = 10;
 const AGE_MAX = 100;
+
+// Registration form versions. Version 1 is the original form (name, age,
+// mobile, email, district, area, unit). Version 2 adds gender, place, a
+// WhatsApp number and accompanying children. A submission without
+// formVersion is read as version 1, so a form page opened before a deploy
+// still works.
+const FORM_VERSION = 2;
+
+// Place is a new, separate field (Area and Unit keep their meaning).
+// Proposed default pending confirmation (TEAM-LEAD-DECISIONS C2).
+const PLACE_REQUIRED = true;
+
+// Upper bounds for the admin-set form rules. The actual gender options, the
+// maximum number of children and the allowed child ages are NOT decided here:
+// admins set them in Website > Page content > Registration form. Until they
+// are set, the gender and children questions are not shown or accepted.
+const FORM_RULE_LIMITS = Object.freeze({
+  genderOptionsMax: 6,
+  childrenMax: 20,
+  childAgeMax: 25,
+});
 
 const PASS_STATUS = Object.freeze({
   NONE: 'not_generated',
@@ -56,6 +78,9 @@ module.exports = {
   ROLE_PERMISSIONS,
   AGE_MIN,
   AGE_MAX,
+  FORM_VERSION,
+  PLACE_REQUIRED,
+  FORM_RULE_LIMITS,
   PASS_STATUS,
   PASS_STATUSES,
   TEMPLATE,

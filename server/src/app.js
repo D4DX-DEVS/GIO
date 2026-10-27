@@ -35,8 +35,8 @@ function createApp() {
         res.set({
           'Access-Control-Allow-Origin': origin,
           'Access-Control-Allow-Credentials': 'true',
-          'Access-Control-Allow-Headers': 'Content-Type, X-Requested-With, Idempotency-Key',
-          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, X-Requested-With, Idempotency-Key, X-File-Name',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
           Vary: 'Origin',
         });
         if (req.method === 'OPTIONS') return res.sendStatus(204);
@@ -51,8 +51,12 @@ function createApp() {
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
   app.use('/api/public', require('./routes/public'));
   app.use('/api/auth', require('./routes/auth'));
+  // Mounted before /api/admin so website requests do not pass through the
+  // registration routes' middleware.
+  app.use('/api/admin/website', require('./routes/website'));
   app.use('/api/admin', require('./routes/admin'));
   app.use('/api/passes', require('./routes/passes'));
+  app.use('/api/assets', require('./routes/assets'));
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
   // Serve the built client (single origin keeps the session cookie first-party).
