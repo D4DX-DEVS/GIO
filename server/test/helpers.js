@@ -1,26 +1,35 @@
-// Test environment: in-memory MongoDB, mock or fake-HTTP DXing, real app.
+// Test environment: in-memory MongoDB, an in-memory stand-in for DigitalOcean
+// Spaces, real app. Nothing here talks to the network.
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test-jwt-secret-that-is-at-least-32-characters';
 process.env.PASS_SIGNING_SECRET = 'test-pass-secret-that-is-at-least-32-characters';
 process.env.ADMIN_USERNAME = 'chief';
 process.env.ADMIN_PASSWORD = 'correct-horse-battery';
-process.env.DXING_MODE = 'mock';
 process.env.EVENT_NAME = 'Test Conference';
 process.env.EVENT_DATE = '1 Jan 2027';
 process.env.EVENT_VENUE = 'Test Hall';
-process.env.PUBLIC_BASE_URL = 'http://public.example';
+// Dummy Spaces settings. Set before ../src is loaded: dotenv never overrides
+// variables that already exist, so a developer's real server/.env cannot leak in.
+process.env.DO_SPACES_KEY = 'test-spaces-key';
+process.env.DO_SPACES_SECRET = 'test-spaces-secret';
+process.env.DO_SPACES_ENDPOINT = 'https://test.example-spaces.com';
+process.env.DO_SPACES_REGION = 'test1';
+process.env.DO_SPACES_BUCKET = 'test-bucket';
+process.env.DO_SPACES_CDN_URL = 'https://cdn.test.example';
+process.env.DO_SPACES_FOLDER = 'TEST';
 process.env.DISTRICTS = 'North District, East District, West District, South District';
 
-const http = require('http');
 const mongoose = require('mongoose');
 const { MongoMemoryServer } = require('mongodb-memory-server');
 const request = require('supertest');
+const { S3Client } = require('@aws-sdk/client-s3');
 const { env } = require('../src/config/env');
 const { createApp } = require('../src/app');
 
 let mongo;
 
 async function start() {
+  spaces.reset();
   mongo = await MongoMemoryServer.create();
   await mongoose.connect(mongo.getUri());
   await Promise.all(Object.values(mongoose.models).map((m) => m.syncIndexes()));
@@ -41,39 +50,85 @@ async function login(app) {
   return agent;
 }
 
-/** Local stand-in for the DXing HTTP API. */
-function fakeDxing() {
-  const received = [];
-  const state = { status: 200, body: { status: 200, message: 'Message has been queued for sending!', data: { messageId: 'abc' } } };
-  const server = http.createServer((req, res) => {
-    let raw = '';
-    req.on('data', (c) => { raw += c; });
-    req.on('end', () => {
-      received.push({ url: req.url, body: JSON.parse(raw || '{}') });
-      res.writeHead(state.status, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(state.body));
+/**
+ * In-memory DigitalOcean Spaces. Replaces S3Client.send, so the real
+ * assetStore code (key building, ACLs, error handling) runs unchanged and no
+ * request ever leaves the process.
+ *
+ *   spaces.objects          Map of full object key -> { body, contentType, acl, cacheControl, modified }
+ *   spaces.keys('passes/')  object keys under TEST/<prefix>, without the TEST/ folder
+ *   spaces.failPuts = true  makes every upload fail, as when Spaces is unreachable
+ *   spaces.reset()          empties the store, clears the failure switch and
+ *                           puts the TEST_PHOTO registrant photo back
+ */
+const spaces = {
+  objects: new Map(),
+  failPuts: false,
+  folder: process.env.DO_SPACES_FOLDER,
+  cdn: process.env.DO_SPACES_CDN_URL,
+  keys(prefix = '') {
+    const full = `${this.folder}/${prefix}`;
+    return [...this.objects.keys()].filter((k) => k.startsWith(full)).map((k) => k.slice(this.folder.length + 1));
+  },
+  reset() {
+    this.objects.clear();
+    this.failPuts = false;
+    this.objects.set(`${this.folder}/photos/${TEST_PHOTO}`, {
+      body: Buffer.from(testPhotoJpeg()),
+      contentType: 'image/jpeg',
+      acl: 'public-read',
+      cacheControl: 'public, max-age=31536000, immutable',
+      modified: new Date(),
     });
-  });
-  return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
-      const { port } = server.address();
-      resolve({
-        received,
-        state,
-        use() {
-          env.dxing.mode = 'live';
-          env.dxing.baseUrl = `http://127.0.0.1:${port}/api`;
-          env.dxing.secret = 'fake-secret';
-          env.dxing.account = 'fake-account';
-        },
-        restore() {
-          env.dxing.mode = 'mock';
-        },
-        close: () => new Promise((r) => server.close(r)),
-      });
-    });
-  });
-}
+  },
+};
+
+// A registrant's photo that is already in the fake bucket after every reset,
+// so the version 3 form (which requires a photo) can be submitted with
+// sampleV3() as it is. Tests that cover the upload itself use their own.
+const TEST_PHOTO = '0123456789abcdef0123456789abcdef.jpg';
+let photoJpeg;
+const testPhotoJpeg = () => (photoJpeg ??= image(400, 500, 'jpeg', '#204060'));
+
+const s3Error = (name, status, message) => Object.assign(new Error(message), { name, $metadata: { httpStatusCode: status } });
+
+S3Client.prototype.send = async function fakeSend(command) {
+  const input = command.input || {};
+  switch (command.constructor.name) {
+    case 'PutObjectCommand': {
+      if (spaces.failPuts) throw s3Error('ServiceUnavailable', 503, 'Spaces is unreachable');
+      const body = Buffer.isBuffer(input.Body) ? Buffer.from(input.Body) : Buffer.from(input.Body ?? '');
+      spaces.objects.set(input.Key, { body, contentType: input.ContentType, acl: input.ACL, cacheControl: input.CacheControl, modified: new Date() });
+      return { ETag: '"fake"', $metadata: { httpStatusCode: 200 } };
+    }
+    case 'GetObjectCommand': {
+      const o = spaces.objects.get(input.Key);
+      if (!o) throw s3Error('NoSuchKey', 404, 'The specified key does not exist.');
+      return {
+        Body: { transformToByteArray: async () => new Uint8Array(o.body) },
+        ContentType: o.contentType,
+        $metadata: { httpStatusCode: 200 },
+      };
+    }
+    case 'HeadObjectCommand': {
+      const o = spaces.objects.get(input.Key);
+      if (!o) throw s3Error('NotFound', 404, 'NotFound');
+      return { ContentLength: o.body.length, ContentType: o.contentType, $metadata: { httpStatusCode: 200 } };
+    }
+    case 'DeleteObjectCommand':
+      spaces.objects.delete(input.Key);
+      return { $metadata: { httpStatusCode: 204 } };
+    case 'ListObjectsV2Command': {
+      const prefix = input.Prefix || '';
+      const Contents = [...spaces.objects.entries()]
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([Key, o]) => ({ Key, Size: o.body.length, LastModified: o.modified }));
+      return { Contents, IsTruncated: false, $metadata: { httpStatusCode: 200 } };
+    }
+    default:
+      throw new Error(`Test Spaces fake does not handle ${command.constructor.name}`);
+  }
+};
 
 const sample = (over = {}) => ({
   name: 'Asha Menon',
@@ -86,16 +141,61 @@ const sample = (over = {}) => ({
   ...over,
 });
 
-// Version 2 form submission (new fields). "Same as phone number" is ticked
-// by default, as on the form.
-const sampleV2 = (over = {}) => ({
-  ...sample(),
-  formVersion: 2,
+// Current (version 3) form submission. "Same as phone number" is ticked by
+// default and no children are added, as on the form. The photo is TEST_PHOTO,
+// which spaces.reset() keeps in the fake bucket.
+const sampleV3 = (over = {}) => ({
+  name: 'Asha Menon',
+  age: 29,
+  email: 'Asha@Example.com',
+  district: 'North District',
+  area: 'Central Area',
+  unit: 'Unit 4',
+  formVersion: 3,
+  photo: TEST_PHOTO,
   place: 'Kakkanad',
+  mobileCountry: 'IN',
+  mobile: '9876543210',
   whatsappSameAsMobile: true,
   childrenCount: 0,
+  children: [],
   ...over,
 });
+
+const LEGACY_DATE = new Date('2026-10-20T10:00:00Z');
+
+/**
+ * A registration exactly as the original code saved it: waiting for an admin
+ * (status submitted, no pass). Insert it with Registration.collection.insertOne
+ * so Mongoose adds no defaults. Pass a unique regNo, nameKey and mobile.
+ */
+function legacyRegistration(over = {}) {
+  return {
+    regNo: 'REG-09001',
+    name: 'Old Submitted',
+    nameKey: 'old submitted',
+    age: 34,
+    mobile: '+919847000001',
+    email: 'old.one@example.com',
+    district: 'North District',
+    area: 'Old Area',
+    unit: 'Old Unit',
+    status: 'submitted',
+    statusChangedAt: LEGACY_DATE,
+    statusHistory: [{ from: null, to: 'submitted', by: null, byName: 'system', note: 'Submitted online', at: LEGACY_DATE }],
+    confirmedAt: null,
+    confirmedBy: null,
+    confirmedByName: '',
+    passId: null,
+    passStatus: 'not_generated',
+    passGeneratedAt: null,
+    passSentAt: null,
+    createdAt: LEGACY_DATE,
+    updatedAt: LEGACY_DATE,
+    __v: 0,
+    ...over,
+  };
+}
 
 /** A solid-colour test image. type: 'png' | 'jpeg' */
 function image(width, height, type = 'png', color = '#7a1020') {
@@ -134,4 +234,4 @@ function jpegWithExif(width, height, orientation) {
 /** Width and height from a PNG header. */
 const pngSize = (b) => ({ width: b.readUInt32BE(16), height: b.readUInt32BE(20) });
 
-module.exports = { start, stop, login, fakeDxing, sample, sampleV2, image, jpegWithExif, pngSize, request, env };
+module.exports = { start, stop, login, spaces, TEST_PHOTO, sample, sampleV3, legacyRegistration, LEGACY_DATE, image, jpegWithExif, pngSize, request, env };

@@ -4,6 +4,8 @@ const express = require('express');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const { env } = require('./config/env');
+const { cdnOrigin } = require('./providers/assetStore');
+const { HttpError } = require('./utils/httpError');
 
 function createApp() {
   const app = express();
@@ -15,15 +17,14 @@ function createApp() {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          imgSrc: ["'self'", 'data:', 'blob:'],
+          // Website and pass images come from the DigitalOcean Spaces CDN.
+          imgSrc: ["'self'", 'data:', 'blob:', cdnOrigin()],
           styleSrc: ["'self'", "'unsafe-inline'"],
           mediaSrc: ["'self'", 'blob:'],
           connectSrc: ["'self'"],
           upgradeInsecureRequests: env.isProduction ? [] : null,
         },
       },
-      // Pass images are fetched by DXing from another origin.
-      crossOriginResourcePolicy: { policy: 'cross-origin' },
     })
   );
 
@@ -56,7 +57,6 @@ function createApp() {
   app.use('/api/admin/website', require('./routes/website'));
   app.use('/api/admin', require('./routes/admin'));
   app.use('/api/passes', require('./routes/passes'));
-  app.use('/api/assets', require('./routes/assets'));
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
   // Serve the built client (single origin keeps the session cookie first-party).
@@ -72,7 +72,8 @@ function createApp() {
     if (err.type === 'entity.too.large') return res.status(413).json({ error: 'Request is too large.' });
     const status = err.status && err.status >= 400 && err.status < 600 ? err.status : 500;
     if (status >= 500) console.error('[server] error:', err);
-    const body = { error: status >= 500 ? 'Something went wrong on the server. Please try again.' : err.message };
+    // A 5xx HttpError is raised on purpose with a message written for the user (e.g. pass_failed).
+    const body = { error: status >= 500 && !(err instanceof HttpError) ? 'Something went wrong on the server. Please try again.' : err.message };
     if (err.fields) body.fields = err.fields;
     if (err.code && typeof err.code === 'string') body.code = err.code;
     return res.status(status).json(body);

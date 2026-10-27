@@ -23,7 +23,7 @@ const SECTIONS: Array<[SectionKey, string]> = [
   ['contact', 'Contact'],
 ];
 
-// Fields that also appear in WhatsApp messages and on entry passes.
+// Fields that also appear on entry passes.
 const EVENT_FIELDS: Array<keyof PageSettings> = ['title', 'dateText', 'location', 'venue'];
 
 const numOrNull = (v: string) => (v.trim() === '' ? null : /^\d+$/.test(v.trim()) ? Number(v.trim()) : NaN);
@@ -215,7 +215,7 @@ export default function PageContent() {
       </div>
 
       <div className="mt-5 space-y-5">
-        <SectionCard id="pc-conference" title="Conference" description="Shown at the top of the website. Title, date, location and venue also appear in WhatsApp messages and on entry passes.">
+        <SectionCard id="pc-conference" title="Conference" description="Shown at the top of the website. Title, date, location and venue also appear on entry passes.">
           {input('presenter', 'Line above the title', { maxLength: 120 })}
           {input('title', 'Title', { maxLength: 160, hint: 'Put *stars* around a word to show it in the accent colour.' })}
           {area('intro', 'Introduction', { maxLength: 1500, rows: 3 })}
@@ -293,7 +293,7 @@ export default function PageContent() {
         <SectionCard
           id="registration"
           title="Registration"
-          description="Gender options and children limits are decisions for GIO Keralam. Until they are filled in, the form does not ask these questions."
+          description="Gender options are a decision for GIO Keralam; until they are filled in, the form does not ask for gender. Accompanying children are always asked for, with the limits below."
         >
           <Toggle
             label="Registration open"
@@ -341,8 +341,8 @@ export default function PageContent() {
           </div>
           <p className={cx('rounded-xl px-4 py-3 text-sm', rules.childrenMax ? 'bg-brand-50 text-brand-800 ring-1 ring-inset ring-brand-100' : 'bg-slate-100/70 text-slate-600')}>
             {rules.childrenMax
-              ? `The form asks for up to ${rules.childrenMax} accompanying children and each child's age. The pass and confirmation show only the number of children.`
-              : 'Children are not asked for. Fill in all three values to add the question.'}
+              ? `The form asks for up to ${rules.childrenMax} accompanying children and each child's name and age. The pass shows only the number of children.`
+              : "The form asks for up to 10 accompanying children aged 0 to 17, with each child's name and age. Fill in all three values to change these limits."}
           </p>
         </SectionCard>
       </div>
@@ -372,9 +372,8 @@ export default function PageContent() {
         <p>Visitors see the new version at their next page load.</p>
         {eventChanged.length > 0 && (
           <p className="mt-3 rounded-xl bg-amber-50 p-3 text-amber-900">
-            The conference title, date, location or venue changes. New WhatsApp messages and every entry pass image drawn from now on will show the new details.
-            {data.passesIssued ? ` ${data.passesIssued} pass${data.passesIssued === 1 ? ' has' : 'es have'} already been issued; images already delivered on WhatsApp keep the old details unless the pass is resent.` : ''}
-            {' '}Holder details on passes do not change.
+            The conference title, date, location or venue changes. Entry passes issued from now on will show the new details.
+            {data.passesIssued ? ` ${data.passesIssued} pass${data.passesIssued === 1 ? ' has' : 'es have'} already been issued; their images keep the details they were issued with.` : ''}
           </p>
         )}
       </Dialog>

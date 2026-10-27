@@ -1,5 +1,6 @@
-// Renders an entry pass as a PNG (WhatsApp displays images inline; a PDF
-// would arrive as a document the attendee has to open).
+// Renders an entry pass as a PNG. It is shown on the registration success
+// page, where the registrant can download or share it, and stored in
+// DigitalOcean Spaces (services/passes.js).
 //
 // No emoji: canvas has no emoji font on most servers.
 const path = require('path');
@@ -14,9 +15,13 @@ registerFont(path.join(FONT_DIR, 'NotoSansMalayalam-Regular.ttf'), { family: 'No
 registerFont(path.join(FONT_DIR, 'NotoSansMalayalam-Bold.ttf'), { family: 'Noto Sans Malayalam', weight: 'bold' });
 
 const W = 1080;
-// Base height. Passes for registrations from the new form grow by a row for
-// Place and a band for accompanying children; older passes keep this size.
+// Base height. Passes for registrations from the new form grow by the photo,
+// a row for Place and a band for accompanying children; older passes keep
+// this size.
 const BASE_H = 1660;
+const PHOTO_W = 260;
+const PHOTO_H = 325; // 4:5 portrait
+const PHOTO_BLOCK_H = 365;
 const PLACE_ROW_H = 100;
 const CHILDREN_BAND_H = 110;
 const FONT = '"Segoe UI", "Helvetica Neue", Arial, "Noto Sans", "Noto Sans Malayalam", sans-serif';
@@ -69,14 +74,31 @@ function wrap(ctx, text, maxWidth, maxLines) {
   return lines.slice(0, maxLines);
 }
 
+// Draws `img` to fill the box, cropping the overflow from the centre.
+function drawCover(ctx, img, x, y, w, h) {
+  const scale = Math.max(w / img.width, h / img.height);
+  const sw = w / scale;
+  const sh = h / scale;
+  ctx.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, x, y, w, h);
+}
+
 /**
  * @param pass  EntryPass document (holder details frozen at issue)
- * @param event current event details { name, date, venue } (services/site.js)
+ * @param event event details { name, date, venue } (services/site.js)
+ * @param photo the holder's photo (JPEG buffer) or null
  */
-async function renderPass(pass, event) {
+async function renderPass(pass, event, photo = null) {
   const h = pass.holder || {};
   const children = typeof h.childrenCount === 'number' ? h.childrenCount : null;
-  const H = BASE_H + (h.place ? PLACE_ROW_H : 0) + (children > 0 ? CHILDREN_BAND_H : 0);
+  let photoImg = null;
+  if (photo) {
+    try {
+      photoImg = await loadImage(photo);
+    } catch {
+      photoImg = null; // the pass is still valid without it
+    }
+  }
+  const H = BASE_H + (photoImg ? PHOTO_BLOCK_H : 0) + (h.place ? PLACE_ROW_H : 0) + (children > 0 ? CHILDREN_BAND_H : 0);
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
 
@@ -127,8 +149,32 @@ async function renderPass(pass, event) {
     ctx.fillText(meta, W / 2, cy + (titleLines.length > 1 ? 300 : 250));
   }
 
-  // Attendee
+  // Photo, so gate staff can match the holder.
   let y = cy + 420;
+  if (photoImg) {
+    const px = (W - PHOTO_W) / 2;
+    const py = cy + 392;
+    ctx.save();
+    ctx.shadowColor = 'rgba(20,33,61,0.18)';
+    ctx.shadowBlur = 24;
+    ctx.shadowOffsetY = 6;
+    roundRect(ctx, px - 6, py - 6, PHOTO_W + 12, PHOTO_H + 12, 28);
+    ctx.fillStyle = C.paper;
+    ctx.fill();
+    ctx.restore();
+    ctx.save();
+    roundRect(ctx, px, py, PHOTO_W, PHOTO_H, 22);
+    ctx.clip();
+    drawCover(ctx, photoImg, px, py, PHOTO_W, PHOTO_H);
+    ctx.restore();
+    roundRect(ctx, px, py, PHOTO_W, PHOTO_H, 22);
+    ctx.strokeStyle = C.line;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    y += PHOTO_BLOCK_H;
+  }
+
+  // Attendee
   ctx.fillStyle = C.muted;
   ctx.font = `600 22px ${FONT}`;
   ctx.fillText('A T T E N D E E', W / 2, y);

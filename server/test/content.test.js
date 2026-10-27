@@ -1,18 +1,19 @@
 // Conference website content: permissions, drafts and publishing, version
-// conflicts, the public payload, event details reaching messages and passes,
-// and image upload, replacement and removal.
+// conflicts, the public payload, event details reaching entry passes, and
+// image upload, replacement and removal (images live in Spaces and are served
+// from the CDN).
 const { test, before, after, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const os = require('os');
-const path = require('path');
-const fs = require('fs');
-const { start, stop, login, sample, image, jpegWithExif, request, env } = require('./helpers');
+const crypto = require('crypto');
+const { start, stop, login, sampleV3, image, jpegWithExif, pngSize, spaces, request, env } = require('./helpers');
 const { createApp } = require('../src/app');
-const { Registration, EntryPass } = require('../src/models');
-const { mockOutbox } = require('../src/providers/dxing');
+const { Registration, EntryPass, Asset } = require('../src/models');
 const { EMPTY_PAGE } = require('../src/config/siteSchema');
 const site = require('../src/services/site');
-const store = require('../src/providers/assetStore');
+
+const CDN_ASSET_URL = /^https:\/\/cdn\.test\.example\/TEST\/assets\/([a-f0-9]{64}\.(?:png|jpg))$/;
+/** The object behind a CDN image URL in the fake bucket, or undefined. */
+const stored = (url) => spaces.objects.get(`TEST/assets/${url.match(CDN_ASSET_URL)[1]}`);
 
 let app;
 let admin;
@@ -78,7 +79,7 @@ describe('page settings', () => {
     const c = (await request(app).get('/api/public/config')).body;
     assert.equal(c.eventName, 'Test Conference');
     assert.deepEqual(c.genderOptions, []);
-    assert.equal(c.children, null);
+    assert.deepEqual(c.children, { max: 10, ageMin: 0, ageMax: 17 });
   });
 
   test('validation: required title, safe links, consistent form rules, no unknown fields', async () => {
@@ -110,7 +111,7 @@ describe('page settings', () => {
     assert.equal(old.body.code, 'stale');
   });
 
-  test('publish makes it public and changes event details for messages and passes', async () => {
+  test('publish makes it public and changes the event details on entry passes', async () => {
     const s = await getSettings();
     const pub = await publish(s.version);
     assert.equal(pub.status, 200);
@@ -127,18 +128,10 @@ describe('page settings', () => {
     assert.equal(c.eventDate, '15 November 2026');
     assert.equal(c.eventVenue, 'Ernakulam');
 
-    // The confirmation message and pass use the published details.
-    const res = await request(app).post('/api/public/registrations').send(sample());
-    assert.equal(res.status, 201);
+    // The pass issued at submission uses the published details.
+    const res = await request(app).post('/api/public/registrations').send(sampleV3());
+    assert.equal(res.status, 201, JSON.stringify(res.body));
     const reg = await Registration.findOne({ regNo: res.body.regNo });
-    const before = mockOutbox.length;
-    const ok = await admin.post(`/api/admin/registrations/${reg._id}/actions/confirm`).set(H).send({});
-    assert.equal(ok.status, 200);
-    const [confirmMsg, passMsg] = mockOutbox.slice(before);
-    assert.match(confirmMsg.message, /International Conference on Women/);
-    assert.match(confirmMsg.message, /Date: 15 November 2026/);
-    assert.match(confirmMsg.message, /Venue: Ernakulam/);
-    assert.match(passMsg.message, /Entry pass - International Conference on Women/);
     const pass = await EntryPass.findOne({ registration: reg._id });
     assert.deepEqual({ ...pass.eventSnapshot.toObject() }, { name: 'International Conference on Women', date: '15 November 2026', venue: 'Ernakulam' });
   });
@@ -176,7 +169,7 @@ describe('page settings', () => {
     await saveAndPublish({ registrationOpen: false });
     assert.equal((await request(app).get('/api/public/config')).body.registrationOpen, false);
     assert.equal((await request(app).get('/api/public/site')).body.registrationOpen, false);
-    assert.equal((await request(app).post('/api/public/registrations').send(sample({ mobile: '9000000777' }))).status, 403);
+    assert.equal((await request(app).post('/api/public/registrations').send(sampleV3({ mobile: '9000000777' }))).status, 403);
 
     await saveAndPublish({ registrationOpen: true });
     assert.equal((await request(app).get('/api/public/config')).body.registrationOpen, true);
@@ -314,7 +307,7 @@ describe('images', () => {
     assert.match((await upload(admin, bomb)).body.error, /megapixels/);
   });
 
-  test('upload stores a re-encoded image, served from a hash URL with a long cache', async () => {
+  test('upload stores a re-encoded image in Spaces under TEST/assets/, named by its hash, and returns its CDN URL', async () => {
     const r = await upload(admin, image(2400, 1200, 'png'), 'Conference poster', '&caption=Official%20poster');
     assert.equal(r.status, 201, JSON.stringify(r.body));
     asset = r.body;
@@ -322,13 +315,37 @@ describe('images', () => {
     assert.equal(asset.height, 800);
     assert.equal(asset.alt, 'Conference poster');
     assert.equal(asset.caption, 'Official poster');
-    assert.match(asset.url, /^\/api\/assets\/[a-f0-9]{64}\.png$/);
-    const file = await request(app).get(asset.url);
-    assert.equal(file.status, 200);
-    assert.equal(file.headers['content-type'], 'image/png');
-    assert.match(file.headers['cache-control'], /immutable/);
+    assert.match(asset.url, CDN_ASSET_URL);
+
+    const file = stored(asset.url);
+    assert.ok(file, 'the bytes are in the fake bucket');
+    assert.ok(spaces.keys('assets/').includes(`assets/${asset.url.match(CDN_ASSET_URL)[1]}`));
+    assert.equal(file.contentType, 'image/png');
+    assert.equal(file.acl, 'public-read');
+    assert.match(file.cacheControl, /immutable/);
+    assert.deepEqual(pngSize(file.body), { width: 1600, height: 800 });
+    assert.equal(crypto.createHash('sha256').update(file.body).digest('hex'), asset.url.match(CDN_ASSET_URL)[1].slice(0, 64));
+
+    // The server no longer serves images itself.
+    assert.equal((await request(app).get(`/api/assets/${asset.url.match(CDN_ASSET_URL)[1]}`)).status, 404);
     assert.equal((await request(app).get('/api/assets/../../etc/passwd')).status, 404);
     assert.equal((await request(app).get(`/api/assets/${'0'.repeat(64)}.png`)).status, 404);
+  });
+
+  test('a failed upload to Spaces saves nothing', async (t) => {
+    t.mock.method(console, 'error', () => {});
+    const libraryBefore = await Asset.countDocuments();
+    const objectsBefore = spaces.objects.size;
+    spaces.failPuts = true;
+    let res;
+    try {
+      res = await upload(admin, image(500, 500, 'png', '#112233'), 'Never stored');
+    } finally {
+      spaces.failPuts = false;
+    }
+    assert.equal(res.status, 500);
+    assert.equal(await Asset.countDocuments(), libraryBefore, 'no library entry for a file that is not stored');
+    assert.equal(spaces.objects.size, objectsBefore);
   });
 
   test('EXIF (including location) is removed and the rotation applied', async () => {
@@ -336,10 +353,12 @@ describe('images', () => {
     assert.equal(r.status, 201, JSON.stringify(r.body));
     assert.equal(r.body.width, 300);
     assert.equal(r.body.height, 400);
-    const file = (await request(app).get(r.body.url).buffer(true)).body;
+    assert.match(r.body.url, CDN_ASSET_URL);
+    const file = stored(r.body.url).body;
     assert.equal(file.indexOf('Exif'), -1);
     assert.equal(file.indexOf('GPS-SECRET-LOCATION'), -1);
     assert.equal((await admin.delete(`/api/admin/website/assets/${r.body.id}`).set(H)).status, 200);
+    assert.equal(stored(r.body.url), undefined, 'removed from Spaces with the library entry');
   });
 
   test('alt text and caption can be edited; alt cannot be emptied', async () => {
@@ -354,6 +373,7 @@ describe('images', () => {
     assert.equal(pub.published.poster, asset.id);
     const pubSite = (await request(app).get('/api/public/site')).body;
     assert.equal(pubSite.page.poster.url, asset.url);
+    assert.match(pubSite.page.poster.url, CDN_ASSET_URL);
     assert.equal(pubSite.page.poster.alt, 'Poster, new alt');
 
     const del = await admin.delete(`/api/admin/website/assets/${asset.id}`).set(H);
@@ -368,9 +388,11 @@ describe('images', () => {
     assert.equal(replaced.status, 200, JSON.stringify(replaced.body));
     assert.equal(replaced.body.id, asset.id);
     assert.notEqual(replaced.body.url, asset.url);
+    assert.match(replaced.body.url, CDN_ASSET_URL);
     assert.match(replaced.body.url, /\.jpg$/);
     assert.deepEqual(replaced.body.usedIn, ['Page content: Poster']);
-    assert.equal((await request(app).get(asset.url)).status, 404, 'old file removed');
+    assert.equal(stored(asset.url), undefined, 'old file removed from Spaces');
+    assert.equal(stored(replaced.body.url).contentType, 'image/jpeg');
     assert.equal((await request(app).get('/api/public/site')).body.page.poster.url, replaced.body.url);
     asset = replaced.body;
   });
@@ -384,32 +406,18 @@ describe('images', () => {
     // Still referenced by the previous published copy? No: draft and published both cleared.
     const del = await admin.delete(`/api/admin/website/assets/${asset.id}`).set(H);
     assert.equal(del.status, 200, JSON.stringify(del.body));
-    assert.equal((await request(app).get(asset.url)).status, 404);
+    assert.equal(stored(asset.url), undefined, 'file removed from Spaces');
     assert.equal((await admin.get('/api/admin/website/assets')).body.assets.find((a) => a.id === asset.id), undefined);
   });
 
-  test('images survive a restart', async () => {
+  test('images survive a restart: a new app lists them with the same CDN URL', async () => {
     const r = await upload(admin, image(400, 400), 'Logo');
+    assert.equal(r.status, 201, JSON.stringify(r.body));
     site.invalidate();
     const fresh = createApp();
-    assert.equal((await request(fresh).get(r.body.url)).status, 200);
-  });
-
-  test('local disk storage works the same way', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gio-assets-'));
-    const saved = { ...env.assets };
-    Object.assign(env.assets, { storage: 'local', dir });
-    try {
-      const r = await upload(admin, image(300, 300, 'jpeg'), 'Local image');
-      assert.equal(r.status, 201);
-      assert.ok(fs.existsSync(path.join(dir, r.body.url.split('/').pop())));
-      assert.equal((await request(app).get(r.body.url)).status, 200);
-      assert.deepEqual(await store.list(), [r.body.url.split('/').pop()]);
-      assert.equal((await admin.delete(`/api/admin/website/assets/${r.body.id}`).set(H)).status, 200);
-      assert.deepEqual(fs.readdirSync(dir), []);
-    } finally {
-      Object.assign(env.assets, saved);
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+    const agent = await login(fresh);
+    const listed = (await agent.get('/api/admin/website/assets')).body.assets.find((a) => a.id === r.body.id);
+    assert.equal(listed.url, r.body.url);
+    assert.ok(stored(listed.url), 'still in Spaces');
   });
 });

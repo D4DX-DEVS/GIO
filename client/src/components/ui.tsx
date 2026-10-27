@@ -1,8 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, ComponentType, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { AlertCircle, Check, CheckCircle2, ChevronDown, Info, Loader2, Search, X } from 'lucide-react';
-import type { PassStatus, Status } from '../lib/types';
-import { PASS_LABEL, STATUS_LABEL, initials } from '../lib/format';
+import { initials } from '../lib/format';
 
 export function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(' ');
@@ -76,7 +75,17 @@ export function Skeleton({ className }: { className?: string }) {
   );
 }
 
-export function Avatar({ name, className }: { name: string; className?: string }) {
+export function Avatar({ name, src, className }: { name: string; src?: string | null; className?: string }) {
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt=""
+        loading="lazy"
+        className={cx('shrink-0 rounded-full object-cover ring-1 ring-inset ring-brand-100', className ?? 'h-10 w-10 text-sm')}
+      />
+    );
+  }
   return (
     <span
       aria-hidden
@@ -342,27 +351,15 @@ export function Combobox({
 
 // --- Badges -------------------------------------------------------------------
 
-const STATUS_STYLE: Record<Status, string> = {
-  submitted: 'bg-amber-50 text-amber-800 ring-amber-200/80 [--dot:theme(colors.amber.500)]',
-  confirmed: 'bg-emerald-50 text-emerald-800 ring-emerald-200/80 [--dot:theme(colors.emerald.500)]',
-};
-
-const PASS_STYLE: Record<PassStatus, string> = {
-  not_generated: 'bg-slate-50 text-slate-500 ring-slate-200 [--dot:theme(colors.slate.300)]',
-  generated: 'bg-brand-50 text-brand-700 ring-brand-200/80 [--dot:theme(colors.brand.400)]',
-  sent: 'bg-emerald-50 text-emerald-800 ring-emerald-200/80 [--dot:theme(colors.emerald.500)]',
-  send_failed: 'bg-red-50 text-red-700 ring-red-200/80 [--dot:theme(colors.red.500)]',
-};
-
 const badge =
   'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset before:h-1.5 before:w-1.5 before:rounded-full before:bg-[var(--dot)]';
 
-export function StatusBadge({ status }: { status: Status }) {
-  return <span className={cx(badge, STATUS_STYLE[status])}>{STATUS_LABEL[status] ?? status}</span>;
-}
-
-export function PassBadge({ status }: { status: PassStatus }) {
-  return <span className={cx(badge, PASS_STYLE[status] ?? PASS_STYLE.not_generated)}>{PASS_LABEL[status] ?? status}</span>;
+export function PassBadge({ hasPass }: { hasPass: boolean }) {
+  return hasPass ? (
+    <span className={cx(badge, 'bg-emerald-50 text-emerald-800 ring-emerald-200/80 [--dot:theme(colors.emerald.500)]')}>Pass issued</span>
+  ) : (
+    <span className={cx(badge, 'bg-amber-50 text-amber-800 ring-amber-200/80 [--dot:theme(colors.amber.500)]')}>No pass yet</span>
+  );
 }
 
 // --- Alert --------------------------------------------------------------------

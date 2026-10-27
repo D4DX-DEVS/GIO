@@ -93,7 +93,11 @@ const TRANSFORMS = {
   8: (w) => [0, -1, 1, 0, 0, w],
 };
 
-async function processImage(buffer) {
+/**
+ * Checks and re-encodes an image. `maxEdge` limits the long side; `jpeg`
+ * makes the result a JPEG even for a PNG (registrants' photos).
+ */
+async function processImage(buffer, { maxEdge = MAX_EDGE, jpeg = false } = {}) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new HttpError(400, 'Choose an image file to upload.');
   if (buffer.length > MAX_BYTES) throw new HttpError(413, 'The image is larger than 5 MB.');
   const info = inspect(buffer);
@@ -113,7 +117,7 @@ async function processImage(buffer) {
     throw new HttpError(400, 'The image could not be read. It may be damaged; try exporting it again.');
   }
 
-  const scale = Math.min(1, MAX_EDGE / Math.max(w, h));
+  const scale = Math.min(1, maxEdge / Math.max(w, h));
   const outW = Math.round(w * scale);
   const outH = Math.round(h * scale);
   // Drawn size of the stored (unrotated) image.
@@ -122,7 +126,8 @@ async function processImage(buffer) {
 
   const canvas = createCanvas(outW, outH);
   const ctx = canvas.getContext('2d');
-  if (info.type === 'jpeg') {
+  const png = info.type === 'png' && !jpeg;
+  if (!png) {
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, outW, outH);
   }
@@ -132,10 +137,10 @@ async function processImage(buffer) {
   ctx.drawImage(image, 0, 0, drawW, drawH);
 
   // PNG keeps transparency (logos); photos stay JPEG.
-  const out = info.type === 'png' ? canvas.toBuffer('image/png') : canvas.toBuffer('image/jpeg', { quality: 0.86, progressive: true });
-  const ext = info.type === 'png' ? 'png' : 'jpg';
+  const out = png ? canvas.toBuffer('image/png') : canvas.toBuffer('image/jpeg', { quality: 0.86, progressive: true });
+  const ext = png ? 'png' : 'jpg';
   const sha256 = crypto.createHash('sha256').update(out).digest('hex');
-  return { buffer: out, mime: info.type === 'png' ? 'image/png' : 'image/jpeg', ext, sha256, key: `${sha256}.${ext}`, width: outW, height: outH };
+  return { buffer: out, mime: png ? 'image/png' : 'image/jpeg', ext, sha256, key: `${sha256}.${ext}`, width: outW, height: outH };
 }
 
 // --- Library -----------------------------------------------------------------
@@ -248,13 +253,4 @@ async function remove(id) {
   return { ok: true };
 }
 
-/** The image file for the public route, or null. Only files with a library entry are served. */
-async function file(key) {
-  if (!store.KEY_RE.test(key)) return null;
-  const asset = await Asset.findOne({ key }).select('mime').lean();
-  if (!asset) return null;
-  const buffer = await store.get(key);
-  return buffer ? { buffer, mime: asset.mime } : null;
-}
-
-module.exports = { inspect, processImage, list, upload, replace, updateMeta, remove, file, MAX_BYTES };
+module.exports = { inspect, processImage, list, upload, replace, updateMeta, remove, MAX_BYTES };

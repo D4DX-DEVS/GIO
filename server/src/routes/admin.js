@@ -1,15 +1,15 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const { Registration, EntryPass, Notification } = require('../models');
-const { STATUS, STATUSES, PASS_STATUS, PASS_STATUSES, TRANSITIONS } = require('../config/constants');
+const { Registration, EntryPass } = require('../models');
+const { PASS_STATUS } = require('../config/constants');
 const { asyncHandler, HttpError } = require('../utils/httpError');
 const { requireAuth, requirePermission, requireCsrfHeader, can } = require('../middleware/auth');
-const { parseListQuery, parseNote } = require('../services/validation');
+const { parseListQuery } = require('../services/validation');
 const registrations = require('../services/registrations');
 const passes = require('../services/passes');
+const photos = require('../services/photos');
 const { formatForDisplay } = require('../utils/phone');
 const { districts: districtList } = require('../config/districts');
-const { recipientOf } = require('../services/notifications');
 
 const router = express.Router();
 router.use(requireCsrfHeader, requireAuth);
@@ -39,82 +39,56 @@ function listItem(r) {
     formVersion: r.formVersion ?? 1,
     gender: r.gender ?? null,
     place: r.place ?? null,
+    // The registrant's photo on the Spaces CDN; null for older registrations.
+    photoUrl: photos.url(r.photo),
     whatsapp: r.whatsapp ?? null,
     whatsappDisplay: r.whatsapp ? formatForDisplay(r.whatsapp) : null,
-    // WhatsApp messages go to this number (see services/notifications.js).
-    messagesTo: formatForDisplay(recipientOf(r)),
     childrenCount: Array.isArray(r.children) ? r.children.length : null,
     status: r.status,
-    statusChangedAt: r.statusChangedAt,
-    confirmedAt: r.confirmedAt || null,
-    confirmedByName: r.confirmedByName || null,
     passId: r.passId,
-    passStatus: r.passStatus,
+    // Every status other than not_generated means the pass exists.
+    hasPass: r.passStatus !== PASS_STATUS.NONE,
     passGeneratedAt: r.passGeneratedAt,
-    passSentAt: r.passSentAt,
     createdAt: r.createdAt,
   };
 }
 
 function passView(pass, registrationId) {
   if (!pass) return null;
+  const route = `/api/admin/registrations/${registrationId}/pass.png?v=${pass.version}`;
   return {
     passId: pass.passId,
     version: pass.version,
     status: pass.status,
     holder: pass.holder,
     issuedAt: pass.issuedAt,
-    // Served through the authenticated admin route, never a public URL.
-    imageUrl: pass.status === 'active' ? `/api/admin/registrations/${registrationId}/pass.png?v=${pass.version}` : null,
-  };
-}
-
-function notificationView(n) {
-  return {
-    id: n._id,
-    template: n.template,
-    status: n.status,
-    attempts: n.attempts,
-    lastError: n.lastError || null,
-    triggeredByName: n.triggeredByName,
-    acceptedAt: n.acceptedAt || null,
-    createdAt: n.createdAt,
-    updatedAt: n.updatedAt,
+    // The admin route redirects to the image on the Spaces CDN (storing it
+    // first for passes issued before images were kept there).
+    imageUrl: pass.status === 'active' ? route : null,
+    downloadUrl: pass.status === 'active' ? `${route}&download=1` : null,
   };
 }
 
 async function detail(registrationId, admin) {
-  const [registration, pass, messages] = await Promise.all([
-    Registration.findById(registrationId),
-    EntryPass.findOne({ registration: registrationId }),
-    Notification.find({ registration: registrationId }).sort({ createdAt: -1 }).limit(50),
-  ]);
+  const [registration, pass] = await Promise.all([Registration.findById(registrationId), EntryPass.findOne({ registration: registrationId })]);
   if (!registration) throw new HttpError(404, 'Registration not found.');
   return {
     registration: {
       ...listItem(registration),
-      // Children's ages are for admins only; they are never printed on the pass.
-      childAges: can(admin, 'approve') && Array.isArray(registration.children) ? registration.children.map((c) => c.age) : null,
+      // Children's names and ages are for admins only; the pass prints only the number.
+      children:
+        can(admin, 'approve') && Array.isArray(registration.children)
+          ? registration.children.map((c) => ({ name: c.name ?? null, age: c.age }))
+          : null,
       statusHistory: registration.statusHistory,
       updatedAt: registration.updatedAt,
     },
     pass: passView(pass, registration._id),
-    notifications: messages.map(notificationView),
   };
-}
-
-function actionResponse(req, result) {
-  return detail(result.registration._id, req.admin).then((d) => ({
-    ...d,
-    messages: result.messages || [],
-    passError: result.passError || null,
-    permissions: permissionsFor(req.admin),
-  }));
 }
 
 function permissionsFor(admin) {
   return {
-    approve: can(admin, 'approve'),
     send: can(admin, 'send'),
     gate: can(admin, 'gate'),
   };
@@ -128,11 +102,11 @@ router.get(
   asyncHandler(async (req, res) => {
     const q = parseListQuery(req.query);
     const filter = {};
-    if (q.status) filter.status = q.status;
     if (q.district) filter.district = exactCI(q.district);
     if (q.area) filter.area = exactCI(q.area);
     if (q.unit) filter.unit = exactCI(q.unit);
-    if (q.passStatus) filter.passStatus = q.passStatus;
+    if (q.pass === 'issued') filter.passStatus = { $ne: PASS_STATUS.NONE };
+    if (q.pass === 'missing') filter.passStatus = PASS_STATUS.NONE;
     if (q.from || q.to) {
       filter.createdAt = {};
       if (q.from) filter.createdAt.$gte = new Date(q.from);
@@ -152,21 +126,11 @@ router.get(
       name: { nameKey: dir, _id: dir },
       age: { age: dir, createdAt: -1 },
       district: { district: dir, nameKey: 1 },
-      // Workflow order rather than alphabetical.
-      status: { statusRank: dir, createdAt: -1 },
     };
     const sort = SORTS[q.sort];
 
     const [items, total] = await Promise.all([
-      q.sort === 'status'
-        ? Registration.aggregate([
-            { $match: filter },
-            { $addFields: { statusRank: { $indexOfArray: [STATUSES, '$status'] } } },
-            { $sort: sort },
-            { $skip: (q.page - 1) * q.limit },
-            { $limit: q.limit },
-          ])
-        : Registration.find(filter).sort(sort).skip((q.page - 1) * q.limit).limit(q.limit).lean(),
+      Registration.find(filter).sort(sort).skip((q.page - 1) * q.limit).limit(q.limit).lean(),
       Registration.countDocuments(filter),
     ]);
     res.json({ items: items.map(listItem), total, page: q.page, limit: q.limit, pages: Math.max(1, Math.ceil(total / q.limit)) });
@@ -177,26 +141,19 @@ router.get(
   '/stats',
   requirePermission('view'),
   asyncHandler(async (_req, res) => {
-    const [rows, passRows, failedMessages] = await Promise.all([
-      Registration.aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }]),
-      Registration.aggregate([{ $group: { _id: '$passStatus', n: { $sum: 1 } } }]),
-      Notification.countDocuments({ status: 'failed' }),
+    const [row] = await Registration.aggregate([
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          withoutPass: { $sum: { $cond: [{ $eq: ['$passStatus', PASS_STATUS.NONE] }, 1, 0] } },
+          children: { $sum: { $size: { $ifNull: ['$children', []] } } },
+        },
+      },
     ]);
-    const byStatus = Object.fromEntries(STATUSES.map((s) => [s, 0]));
-    for (const r of rows) if (r._id in byStatus) byStatus[r._id] = r.n;
-    const byPassStatus = Object.fromEntries(PASS_STATUSES.map((s) => [s, 0]));
-    for (const r of passRows) if (r._id in byPassStatus) byPassStatus[r._id] = r.n;
-    res.json({
-      total: Object.values(byStatus).reduce((a, b) => a + b, 0),
-      // "Awaiting confirmation" is the dashboard label for Submitted.
-      awaitingConfirmation: byStatus[STATUS.SUBMITTED],
-      confirmed: byStatus[STATUS.CONFIRMED],
-      passesSent: byPassStatus[PASS_STATUS.SENT],
-      passSendFailed: byPassStatus[PASS_STATUS.SEND_FAILED],
-      byStatus,
-      byPassStatus,
-      failedMessages,
-    });
+    const total = row?.total ?? 0;
+    const withoutPass = row?.withoutPass ?? 0;
+    res.json({ total, passesIssued: total - withoutPass, withoutPass, children: row?.children ?? 0 });
   })
 );
 
@@ -223,7 +180,7 @@ router.get(
       distinct('area', areaMatch),
       distinct('unit', unitMatch),
     ]);
-    res.json({ districts: districtList(), areas, units, statuses: STATUSES, passStatuses: PASS_STATUSES });
+    res.json({ districts: districtList(), areas, units });
   })
 );
 
@@ -236,68 +193,42 @@ router.get(
   })
 );
 
-// --- Workflow ----------------------------------------------------------------
+// --- Entry pass ----------------------------------------------------------------
 
-// Permission depends on the action (only admins confirm).
-function requireActionPermission(req, res, next) {
-  const rule = TRANSITIONS[req.params.action];
-  if (!rule) return next(new HttpError(404, 'Unknown action.'));
-  return requirePermission(rule.permission)(req, res, next);
-}
-
-router.post(
-  '/registrations/:id/actions/:action',
-  requireActionPermission,
-  asyncHandler(async (req, res) => {
-    checkId(req.params.id);
-    const note = parseNote(req.body);
-    const result = await registrations.transition(req.params.id, req.params.action, req.actor, note);
-    res.json(await actionResponse(req, result));
-  })
-);
-
+// Passes are generated at submission. This is for a registration without one
+// (generation failed and the registrant left, or it predates automatic passes).
 router.post(
   '/registrations/:id/pass/generate',
   requirePermission('send'),
   asyncHandler(async (req, res) => {
     checkId(req.params.id);
-    res.json(await actionResponse(req, await registrations.generatePass(req.params.id, req.actor)));
+    await registrations.generatePass(req.params.id, req.actor);
+    res.json({ ...(await detail(req.params.id, req.admin)), permissions: permissionsFor(req.admin) });
   })
 );
 
-router.post(
-  '/registrations/:id/pass/resend',
-  requirePermission('send'),
-  asyncHandler(async (req, res) => {
-    checkId(req.params.id);
-    res.json(await actionResponse(req, await registrations.resendPass(req.params.id, req.actor)));
-  })
-);
-
-router.post(
-  '/registrations/:id/notifications/:nid/retry',
-  requirePermission('send'),
-  asyncHandler(async (req, res) => {
-    checkId(req.params.id, req.params.nid);
-    res.json(await actionResponse(req, await registrations.retryNotification(req.params.id, req.params.nid, req.actor)));
-  })
-);
-
+// Viewing redirects to the image on the Spaces CDN; ?download=1 sends the
+// file from this origin with a download file name (a cross-origin link
+// cannot set one).
 router.get(
   '/registrations/:id/pass.png',
   requirePermission('view'),
   asyncHandler(async (req, res) => {
     checkId(req.params.id);
-    const pass = await EntryPass.findOne({ registration: req.params.id, status: 'active' });
-    if (!pass) throw new HttpError(404, 'No active entry pass.');
-    const png = await passes.render(pass);
-    const disposition = req.query.download === '1' ? 'attachment' : 'inline';
+    const found = await EntryPass.findOne({ registration: req.params.id, status: 'active' });
+    if (!found) throw new HttpError(404, 'No active entry pass.');
+    if (req.query.download !== '1') {
+      const pass = await passes.storeImage(found);
+      res.set('Cache-Control', 'private, no-store');
+      return res.redirect(302, passes.imageUrl(pass));
+    }
+    const { pass, png } = await passes.imageFile(found);
     res.set({
       'Content-Type': 'image/png',
       'Cache-Control': 'private, no-store',
-      'Content-Disposition': `${disposition}; filename="entry-pass-${pass.passId}.png"`,
+      'Content-Disposition': `attachment; filename="entry-pass-${pass.passId}.png"`,
     });
-    res.send(png);
+    return res.send(png);
   })
 );
 

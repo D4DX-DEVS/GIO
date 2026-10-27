@@ -25,21 +25,32 @@ const registrationSchema = new mongoose.Schema(
     mobile: { type: String, required: true },
     email: { type: String, required: true, trim: true, lowercase: true, maxlength: 200 },
     district: { type: String, required: true, trim: true, maxlength: 100 },
-    area: { type: String, required: true, trim: true, maxlength: 100 },
-    unit: { type: String, required: true, trim: true, maxlength: 100 },
+    // Optional from form version 3; empty when not given.
+    area: { type: String, trim: true, maxlength: 100, default: '' },
+    unit: { type: String, trim: true, maxlength: 100, default: '' },
 
-    // Added with form version 2. All optional so records saved by the
+    // Added with form versions 2 and 3. All optional so records saved by the
     // original form stay valid; a missing value means "not recorded".
     formVersion: { type: Number, default: undefined },
     gender: { type: String, trim: true, maxlength: 30, default: undefined },
     place: { type: String, trim: true, maxlength: 100, default: undefined },
-    // E.164. WhatsApp messages go here; when absent (older records) they go
-    // to `mobile`, as before.
+    // Key of the registrant's photo in Spaces (providers/assetStore.js,
+    // photos). Required from form version 3; printed on the entry pass.
+    photo: { type: String, default: undefined },
+    // E.164. Absent on registrations from the original form.
     whatsapp: { type: String, default: undefined },
     // One entry per accompanying child. `default: undefined` keeps older
     // records without the field, so they read as "not recorded" rather than
-    // "0 children".
-    children: { type: [new mongoose.Schema({ age: { type: Number, min: 0, max: 25 } }, { _id: false })], default: undefined },
+    // "0 children". Names are recorded from form version 3.
+    children: {
+      type: [
+        new mongoose.Schema(
+          { name: { type: String, trim: true, maxlength: 120, default: undefined }, age: { type: Number, min: 0, max: 25 } },
+          { _id: false }
+        ),
+      ],
+      default: undefined,
+    },
 
     status: { type: String, enum: STATUSES, default: STATUS.SUBMITTED, index: true },
     statusChangedAt: { type: Date, default: Date.now },

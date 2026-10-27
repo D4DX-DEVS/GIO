@@ -1,69 +1,75 @@
-// Registration business logic: submission, status transitions and the
-// side effects each transition triggers (entry pass, WhatsApp messages).
-// Message sending itself lives in ./notifications.
-const { Registration, Counter, EntryPass, Notification } = require('../models');
-const { STATUS, TRANSITIONS, TEMPLATE, PASS_STATUS } = require('../config/constants');
+// Registration business logic: submission and the entry pass that every
+// registration gets as soon as it is submitted.
+const { Registration, Counter } = require('../models');
+const { STATUS } = require('../config/constants');
 const { HttpError } = require('../utils/httpError');
-const notifications = require('./notifications');
 const passes = require('./passes');
-
-const RESEND_COOLDOWN_MS = 60 * 1000;
 
 const nameKeyOf = (name) => name.toLocaleLowerCase('en').replace(/\s+/g, ' ').trim();
 
 const DUPLICATE = () =>
   new HttpError(409, 'A registration with this name and mobile number already exists.', { code: 'duplicate' });
 
-function summarize(result) {
-  if (!result) return null;
-  return {
-    ok: result.ok,
-    duplicate: Boolean(result.duplicate),
-    error: result.error || null,
-    template: result.notification?.template ?? null,
-  };
+/**
+ * Generates the entry pass right after a submission is saved. When that
+ * fails (for example Spaces is unreachable), the registration is kept and
+ * the registrant is asked to press Submit again: the same Idempotency-Key
+ * returns this registration and tries the pass again.
+ */
+async function issueForRegistrant(registration) {
+  try {
+    return await passes.issue(registration);
+  } catch (err) {
+    console.error(`[registrations] entry pass for ${registration.regNo} failed:`, err);
+    throw new HttpError(
+      503,
+      `Your registration ${registration.regNo} is saved, but your entry pass could not be created just now. Please press Submit again in a moment.`,
+      { code: 'pass_failed' }
+    );
+  }
 }
 
 /**
- * Public submission. Returns { registration, created, acknowledgement }.
+ * Public submission. Returns { registration, pass, created }. The
+ * registration is confirmed automatically and its entry pass generated.
  * `created` is false when the same submission key was already processed
- * (double tap, network retry), in which case nothing new is saved or sent.
+ * (double tap, network retry); nothing new is saved and the existing pass is
+ * returned.
  */
 async function submit(data, submissionKey) {
   if (submissionKey) {
     const previous = await Registration.findOne({ submissionKey });
-    if (previous) return { registration: previous, created: false };
+    if (previous) return { registration: previous, pass: await issueForRegistrant(previous), created: false };
   }
 
   const nameKey = nameKeyOf(data.name);
   if (await Registration.exists({ mobile: data.mobile, nameKey })) throw DUPLICATE();
 
   const seq = await Counter.next('registration');
+  const now = new Date();
   let registration;
   try {
     registration = await Registration.create({
       ...data,
       nameKey,
       regNo: `REG-${String(seq).padStart(5, '0')}`,
-      status: STATUS.SUBMITTED,
-      statusHistory: [{ from: null, to: STATUS.SUBMITTED, byName: 'system', note: 'Submitted online' }],
+      status: STATUS.CONFIRMED,
+      statusChangedAt: now,
+      confirmedAt: now,
+      confirmedByName: 'system',
+      statusHistory: [{ from: null, to: STATUS.CONFIRMED, byName: 'system', note: 'Submitted online and confirmed automatically', at: now }],
       submissionKey: submissionKey || undefined,
     });
   } catch (err) {
     if (err.code !== 11000) throw err;
     if (err.keyPattern?.submissionKey) {
-      return { registration: await Registration.findOne({ submissionKey }), created: false };
+      const previous = await Registration.findOne({ submissionKey });
+      return { registration: previous, pass: await issueForRegistrant(previous), created: false };
     }
     throw DUPLICATE();
   }
 
-  // The registrant does not wait for WhatsApp. The outcome is recorded on the
-  // notification and shown to admins, who can retry a failure.
-  const acknowledgement = notifications
-    .statusMessage(registration, TEMPLATE.SUBMITTED, null)
-    .catch((err) => console.error('[registrations] acknowledgement failed:', err.message));
-
-  return { registration, created: true, acknowledgement };
+  return { registration, pass: await issueForRegistrant(registration), created: true };
 }
 
 async function findOr404(id) {
@@ -72,125 +78,33 @@ async function findOr404(id) {
   return registration;
 }
 
-async function recordPassSend(registration, result) {
-  const accepted = result.ok && result.notification?.status === 'accepted';
-  const update = accepted
-    ? { passStatus: PASS_STATUS.SENT, passSentAt: result.notification.acceptedAt }
-    : { passStatus: PASS_STATUS.SEND_FAILED };
-  // Never downgrade a pass that was already sent because a later resend failed.
-  const filter = accepted ? { _id: registration._id } : { _id: registration._id, passStatus: { $ne: PASS_STATUS.SENT } };
-  await Registration.updateOne(filter, { $set: update });
-}
-
-async function generateAndSendPass(registration, actor, result) {
-  try {
-    result.pass = await passes.issue(registration, actor);
-  } catch (err) {
-    console.error('[registrations] pass generation failed:', err);
-    result.passError = 'The entry pass could not be generated. Use "Generate pass" to try again.';
-    return result;
-  }
-  const sent = await notifications.sendPass(registration, result.pass, actor);
-  await recordPassSend(registration, sent);
-  result.messages.push(summarize(sent));
-  return result;
-}
-
 /**
- * Applies a workflow action. The current status is part of the update filter,
- * so a double click or two admins acting at once cannot apply the same
- * transition twice (and therefore cannot send its message twice).
+ * Admin recovery: generates the pass of a registration that has none, either
+ * because the registrant left after pass generation failed, or because it
+ * was submitted before passes were generated automatically (it is confirmed
+ * first).
  */
-async function transition(id, action, actor, note = '') {
-  const rule = TRANSITIONS[action];
-  if (!rule) throw new HttpError(404, 'Unknown action.');
-
-  const current = await findOr404(id);
-  if (!rule.from.includes(current.status)) {
-    throw new HttpError(409, `This registration is already ${current.status}.`, { code: 'invalid_transition' });
-  }
-
-  const now = new Date();
-  const set = { status: rule.to, statusChangedAt: now };
-  if (rule.to === STATUS.CONFIRMED) Object.assign(set, { confirmedAt: now, confirmedBy: actor.id, confirmedByName: actor.name });
-
-  const registration = await Registration.findOneAndUpdate(
-    { _id: id, status: current.status },
-    {
-      $set: set,
-      $push: { statusHistory: { from: current.status, to: rule.to, by: actor.id, byName: actor.name, note } },
-    },
-    { new: true }
-  );
-  if (!registration) {
-    throw new HttpError(409, 'This registration was just updated by someone else. Refresh and try again.', {
-      code: 'conflict',
-    });
-  }
-
-  const result = { registration, messages: [], pass: null };
-
-  if (rule.to === STATUS.CONFIRMED) {
-    // The confirmation is saved first; the pass is generated only after that.
-    result.messages.push(summarize(await notifications.statusMessage(registration, TEMPLATE.CONFIRMED, actor)));
-    await generateAndSendPass(registration, actor, result);
-  }
-
-  return result;
-}
-
-/** Recovery when generation failed after confirmation. */
 async function generatePass(id, actor) {
-  const registration = await findOr404(id);
-  if (registration.status !== STATUS.CONFIRMED) {
-    throw new HttpError(409, 'An entry pass can only be generated after the registration is confirmed.');
+  let registration = await findOr404(id);
+  if (registration.status === STATUS.SUBMITTED) {
+    const now = new Date();
+    registration =
+      (await Registration.findOneAndUpdate(
+        { _id: id, status: STATUS.SUBMITTED },
+        {
+          $set: { status: STATUS.CONFIRMED, statusChangedAt: now, confirmedAt: now, confirmedBy: actor.id, confirmedByName: actor.name },
+          $push: { statusHistory: { from: STATUS.SUBMITTED, to: STATUS.CONFIRMED, by: actor.id, byName: actor.name, note: 'Confirmed when the entry pass was generated', at: now } },
+        },
+        { new: true }
+      )) ?? (await findOr404(id));
   }
-  if (await EntryPass.exists({ registration: registration._id, status: 'active' })) {
-    throw new HttpError(409, 'This registration already has an entry pass. Use "Resend pass" to send it again.');
+  try {
+    await passes.issue(registration, actor);
+  } catch (err) {
+    console.error(`[registrations] entry pass for ${registration.regNo} failed:`, err);
+    throw new HttpError(503, 'The entry pass could not be generated. Check the file storage settings and try again.', { code: 'pass_failed' });
   }
-  return generateAndSendPass(registration, actor, { registration, messages: [], pass: null });
+  return { registration: await findOr404(id) };
 }
 
-async function resendPass(id, actor) {
-  const registration = await findOr404(id);
-  if (registration.status !== STATUS.CONFIRMED) {
-    throw new HttpError(409, 'Only confirmed registrations have an entry pass.');
-  }
-  const pass = await EntryPass.findOne({ registration: registration._id, status: 'active' });
-  if (!pass) throw new HttpError(409, 'No entry pass has been generated yet.');
-
-  const last = await notifications.lastMessage(registration._id, TEMPLATE.PASS);
-  if (last && last.status !== 'failed') {
-    const age = Date.now() - last.createdAt.getTime();
-    if (age < RESEND_COOLDOWN_MS) {
-      const wait = Math.ceil((RESEND_COOLDOWN_MS - age) / 1000);
-      throw new HttpError(429, `The pass was sent moments ago. Wait ${wait} seconds before sending it again.`);
-    }
-  }
-  const sent = await notifications.sendPass(registration, pass, actor);
-  await recordPassSend(registration, sent);
-  return { registration, pass, messages: [summarize(sent)] };
-}
-
-// The statuses in which a failed message still makes sense to retry.
-const RETRY_ALLOWED_IN = {
-  [TEMPLATE.SUBMITTED]: [STATUS.SUBMITTED, STATUS.CONFIRMED],
-  [TEMPLATE.CONFIRMED]: [STATUS.CONFIRMED],
-  [TEMPLATE.PASS]: [STATUS.CONFIRMED],
-};
-
-async function retryNotification(id, notificationId, actor) {
-  const registration = await findOr404(id);
-  const record = await Notification.findOne({ _id: notificationId, registration: registration._id });
-  if (!record) throw new HttpError(404, 'Message not found.');
-  if (record.status === 'accepted') throw new HttpError(409, 'This message was already accepted by DXing.');
-  if (!RETRY_ALLOWED_IN[record.template]?.includes(registration.status)) {
-    throw new HttpError(409, `This message no longer applies: the registration is now ${registration.status}.`);
-  }
-  const result = await notifications.retry(record._id, registration, actor);
-  if (!result) throw new HttpError(409, 'This message is being sent right now.');
-  if (record.template === TEMPLATE.PASS) await recordPassSend(registration, result);
-  return { registration, messages: [summarize(result)] };
-}
-
-module.exports = { submit, transition, generatePass, resendPass, retryNotification, findOr404 };
+module.exports = { submit, generatePass, findOr404 };

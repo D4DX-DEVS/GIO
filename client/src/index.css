@@ -1,8 +1,6 @@
 /* Fonts shared by the public website and the admin console (self-hosted;
    the CSP allows same-origin fonts only). */
-@import '@fontsource/instrument-serif/400.css';
-@import '@fontsource/instrument-serif/400-italic.css';
-@import '@fontsource-variable/hanken-grotesk/wght.css';
+@import '@fontsource-variable/outfit/wght.css';
 
 @tailwind base;
 @tailwind components;
@@ -67,9 +65,9 @@
   .kicker {
     @apply text-[11.5px] font-semibold uppercase tracking-[0.2em] text-brand-500;
   }
-  /* Serif display heading used for page and section titles. */
+  /* Display heading used for page and section titles. */
   .display {
-    @apply font-serif font-normal tracking-[-0.01em] text-slate-900;
+    @apply font-serif font-semibold tracking-[-0.01em] text-slate-900;
   }
 }
 

@@ -8,39 +8,39 @@ import {
   ArrowUp,
   ArrowUpDown,
   ArrowUpNarrowWide,
-  BadgeCheck,
+  Baby,
   CalendarRange,
   ChevronLeft,
   ChevronRight,
   Download,
   Eye,
-  FileCheck2,
-  Hourglass,
   Inbox,
   Mail,
   MapPin,
   Phone,
-  RefreshCw,
   RotateCcw,
   Search,
   SearchX,
-  SendHorizontal,
   SlidersHorizontal,
   Ticket,
+  TriangleAlert,
   Users,
   X,
 } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
-import type { FilterOptions, ListResponse, PassStatus, RegistrationDetail, RegistrationItem, Stats, Status } from '../../lib/types';
-import { PASS_LABEL, STATUS_LABEL, formatDate } from '../../lib/format';
-import { Alert, Avatar, Button, Dialog, EmptyState, PassBadge, Skeleton, StatusBadge, cx } from '../../components/ui';
-import { DownloadPassLink, PassViewer, useRegistrationActions } from '../../components/RegistrationActions';
-import type { ActionKind } from '../../components/RegistrationActions';
+import type { FilterOptions, ListResponse, RegistrationDetail, RegistrationItem, Stats } from '../../lib/types';
+import { formatDate } from '../../lib/format';
+import { Alert, Avatar, Button, Dialog, EmptyState, PassBadge, Skeleton, cx } from '../../components/ui';
+import { DownloadPassLink, PassViewer, useGeneratePass } from '../../components/RegistrationActions';
 import { useLayout } from './AdminLayout';
 
-const STATUSES: Status[] = ['submitted', 'confirmed'];
-const PASS_STATUSES: PassStatus[] = ['not_generated', 'generated', 'sent', 'send_failed'];
+// Every registration gets its pass at submission; "missing" lists the few
+// without one (generation failed, or made before passes were automatic).
+const PASS_FILTERS: Array<[string, string]> = [
+  ['issued', 'Pass issued'],
+  ['missing', 'No pass yet'],
+];
 type SortKey = 'createdAt' | 'name' | 'age' | 'district';
 const SORTS: Array<[SortKey, string]> = [
   ['createdAt', 'Registration date'],
@@ -50,11 +50,10 @@ const SORTS: Array<[SortKey, string]> = [
 ];
 const PAGE_SIZES = ['10', '20', '50', '100'];
 
-const FILTER_KEYS = ['status', 'passStatus', 'district', 'area', 'unit', 'from', 'to'] as const;
+const FILTER_KEYS = ['pass', 'district', 'area', 'unit', 'from', 'to'] as const;
 type FilterKey = (typeof FILTER_KEYS)[number];
 const FILTER_LABEL: Record<FilterKey, string> = {
-  status: 'Status',
-  passStatus: 'Entry pass',
+  pass: 'Entry pass',
   district: 'District',
   area: 'Area',
   unit: 'Unit',
@@ -143,19 +142,20 @@ function StatCard({
   tone: keyof typeof TONES;
   note?: ReactNode;
   active: boolean;
-  onClick: () => void;
+  // Without onClick the card is information only, not a filter.
+  onClick?: () => void;
   delay: number;
 }) {
   const t = TONES[tone];
   const share = value !== undefined && total ? Math.round((value / total) * 100) : 0;
+  const Tag = onClick ? 'button' : 'div';
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
+    <Tag
+      {...(onClick ? { type: 'button' as const, onClick, 'aria-pressed': active } : {})}
       style={{ animationDelay: `${delay}ms` }}
       className={cx(
-        'group relative flex min-w-0 animate-fade-up flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-4 text-left shadow-panel transition duration-200 hover:border-slate-300 hover:shadow-soft focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-600/20 sm:p-5',
+        'group relative flex min-w-0 animate-fade-up flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-4 text-left shadow-panel transition duration-200 sm:p-5',
+        onClick && 'hover:border-slate-300 hover:shadow-soft focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-600/20',
         active && cx('ring-2', t.ring)
       )}
     >
@@ -176,110 +176,36 @@ function StatCard({
       </span>
       <span className="mt-2 flex min-h-[1rem] items-center justify-between gap-2 text-xs text-slate-500">
         <span className="truncate">{note}</span>
-        <ArrowRight className="h-3.5 w-3.5 shrink-0 -translate-x-1 text-brand-400 opacity-0 transition group-hover:translate-x-0 group-hover:opacity-100" aria-hidden />
-      </span>
-    </button>
-  );
-}
-
-function WorkflowStrip({ stats, onPick }: { stats: Stats | null; onPick: (q: Record<string, string>) => void }) {
-  const p = stats?.byPassStatus;
-  const steps = [
-    { label: 'Submitted', hint: 'Awaiting confirmation', n: stats?.byStatus.submitted, icon: FileCheck2, q: { status: 'submitted', passStatus: '' } },
-    { label: 'Confirmed', hint: 'By an admin', n: stats?.byStatus.confirmed, icon: BadgeCheck, q: { status: 'confirmed', passStatus: '' } },
-    {
-      label: 'Entry pass generated',
-      hint: 'Unique QR pass',
-      n: p ? p.generated + p.sent + p.send_failed : undefined,
-      icon: Ticket,
-      q: { status: 'confirmed', passStatus: '' },
-    },
-    { label: 'Entry pass sent', hint: 'Through DXing WhatsApp', n: p?.sent, icon: SendHorizontal, q: { status: '', passStatus: 'sent' } },
-  ];
-  return (
-    <section className="card mt-5 p-4 sm:p-5" aria-labelledby="workflow-title">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="workflow-title" className="display text-[22px] leading-tight">
-          Registration workflow
-        </h2>
-        {stats && stats.passSendFailed > 0 && (
-          <button
-            type="button"
-            onClick={() => onPick({ status: '', passStatus: 'send_failed' })}
-            className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-inset ring-red-200 transition hover:bg-red-100"
-          >
-            <RefreshCw className="h-3.5 w-3.5" aria-hidden /> {stats.passSendFailed} pass{stats.passSendFailed === 1 ? '' : 'es'} to retry
-          </button>
+        {onClick && (
+          <ArrowRight className="h-3.5 w-3.5 shrink-0 -translate-x-1 text-brand-400 opacity-0 transition group-hover:translate-x-0 group-hover:opacity-100" aria-hidden />
         )}
-      </div>
-      <ol className="mt-4 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
-        {steps.map((s, i) => (
-          <li key={s.label} className="relative min-w-0">
-            <button
-              type="button"
-              onClick={() => onPick(s.q)}
-              className="flex min-h-[64px] w-full items-center gap-3 rounded-xl border border-slate-200/70 bg-slate-50 p-3 text-left transition hover:border-brand-200 hover:bg-brand-50/60"
-            >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-brand-600 ring-1 ring-inset ring-slate-200">
-                <s.icon className="h-[18px] w-[18px]" aria-hidden />
-              </span>
-              <span className="min-w-0">
-                <span className="block font-serif text-[26px] leading-none tabular-nums text-slate-900">{s.n ?? '–'}</span>
-                <span className="mt-1 block text-xs font-semibold leading-snug text-slate-700 sm:truncate">{s.label}</span>
-                <span className="hidden truncate text-[11px] text-slate-400 sm:block">{s.hint}</span>
-              </span>
-            </button>
-            {i < steps.length - 1 && (
-              <ChevronRight
-                aria-hidden
-                className="absolute -right-[13px] top-1/2 z-[1] hidden h-4 w-4 -translate-y-1/2 rounded-full bg-white text-slate-400 ring-1 ring-slate-200 lg:block"
-              />
-            )}
-          </li>
-        ))}
-      </ol>
-    </section>
+      </span>
+    </Tag>
   );
 }
 
 function RowActions({
   r,
-  canApprove,
   canSend,
   back,
-  onAction,
+  onGenerate,
   onViewPass,
   layout,
 }: {
   r: RegistrationItem;
-  canApprove: boolean;
   canSend: boolean;
   back: { back: string };
-  onAction: (k: ActionKind, r: RegistrationItem) => void;
+  onGenerate: (r: RegistrationItem) => void;
   onViewPass: (r: RegistrationItem) => void;
   layout: 'row' | 'card';
 }) {
-  const hasPass = r.status === 'confirmed' && r.passStatus !== 'not_generated' && Boolean(r.passId);
+  const hasPass = r.hasPass && Boolean(r.passId);
   const card = layout === 'card';
   const iconBtn = 'inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-500 transition hover:bg-brand-50 hover:text-brand-700';
   const cardBtn = 'btn-line inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-full px-3 text-[13px] font-semibold';
 
-  const confirm = r.status === 'submitted' && canApprove && (
-    <Button
-      size={card ? 'md' : 'sm'}
-      onClick={() => onAction('confirm', r)}
-      className={cx('shadow-glow', card && 'w-full')}
-    >
-      <BadgeCheck className="h-4 w-4" aria-hidden /> Confirm Registration
-    </Button>
-  );
-  const retry = r.status === 'confirmed' && canSend && r.passStatus === 'send_failed' && (
-    <Button size={card ? 'md' : 'sm'} variant="secondary" onClick={() => onAction('resend', r)} className={cx('border-red-200 text-red-700 hover:bg-red-50', card && 'w-full')}>
-      <RefreshCw className="h-4 w-4" aria-hidden /> Retry sending pass
-    </Button>
-  );
-  const generate = r.status === 'confirmed' && canSend && r.passStatus === 'not_generated' && (
-    <Button size={card ? 'md' : 'sm'} variant="soft" onClick={() => onAction('generate', r)} className={card ? 'w-full' : ''}>
+  const generate = !r.hasPass && canSend && (
+    <Button size={card ? 'md' : 'sm'} variant="soft" onClick={() => onGenerate(r)} className={card ? 'w-full' : ''}>
       <Ticket className="h-4 w-4" aria-hidden /> Generate pass
     </Button>
   );
@@ -287,7 +213,7 @@ function RowActions({
   if (card) {
     return (
       <div className="space-y-2">
-        {confirm || retry || generate}
+        {generate}
         <div className="flex gap-2">
           <Link to={`/admin/registrations/${r.id}`} state={back} className={cardBtn}>
             <Eye className="h-4 w-4" aria-hidden /> Details
@@ -309,7 +235,7 @@ function RowActions({
 
   return (
     <div className="flex items-center justify-end gap-1">
-      {confirm || retry || generate}
+      {generate}
       {hasPass && (
         <>
           <button type="button" onClick={() => onViewPass(r)} className={iconBtn} title="View entry pass">
@@ -378,7 +304,6 @@ function pageList(page: number, pages: number): Array<number | '…'> {
 export default function Dashboard() {
   const { admin } = useAuth();
   const { stats, refreshStats } = useLayout();
-  const canApprove = Boolean(admin?.permissions.includes('approve'));
   const canSend = Boolean(admin?.permissions.includes('send'));
 
   const [params, setParams] = useSearchParams();
@@ -401,8 +326,8 @@ export default function Dashboard() {
   const [viewing, setViewing] = useState<RegistrationItem | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
 
-  const { ask, dialog } = useRegistrationActions((res: RegistrationDetail) => {
-    const { statusHistory, updatedAt, ...item } = res.registration;
+  const { ask, dialog } = useGeneratePass((res: RegistrationDetail) => {
+    const { statusHistory, updatedAt, children, ...item } = res.registration;
     setData((d) => (d ? { ...d, items: d.items.map((x) => (x.id === item.id ? item : x)) } : d));
     setFlashId(item.id);
     refreshStats();
@@ -450,7 +375,7 @@ export default function Dashboard() {
 
   const query = useMemo(() => {
     const q = new URLSearchParams();
-    for (const k of ['search', 'status', 'passStatus', 'district', 'area', 'unit', 'sort', 'dir', 'page', 'limit']) {
+    for (const k of ['search', 'pass', 'district', 'area', 'unit', 'sort', 'dir', 'page', 'limit']) {
       const v = params.get(k) ?? DEFAULTS[k];
       if (v) q.set(k, v);
     }
@@ -485,8 +410,7 @@ export default function Dashboard() {
 
   const activeKeys = FILTER_KEYS.filter((k) => params.get(k));
   const page = Number(get('page')) || 1;
-  const status = get('status');
-  const passStatus = get('passStatus');
+  const pass = get('pass');
   const sort = get('sort');
   const dir = get('dir');
 
@@ -511,8 +435,7 @@ export default function Dashboard() {
 
   const chipValue = (k: FilterKey) => {
     const v = params.get(k) ?? '';
-    if (k === 'status') return STATUS_LABEL[v as Status] ?? v;
-    if (k === 'passStatus') return PASS_LABEL[v as PassStatus] ?? v;
+    if (k === 'pass') return PASS_FILTERS.find(([x]) => x === v)?.[1] ?? v;
     if (k === 'from' || k === 'to') return formatDate(`${v}T00:00:00`);
     return v;
   };
@@ -526,8 +449,7 @@ export default function Dashboard() {
 
   const filterFields = (
     <>
-      <FilterSelect label="Registration status" value={status} onChange={(v) => setParam({ status: v })} options={STATUSES.map((x) => [x, STATUS_LABEL[x]])} />
-      <FilterSelect label="Entry pass" value={passStatus} onChange={(v) => setParam({ passStatus: v })} options={PASS_STATUSES.map((x) => [x, PASS_LABEL[x]])} />
+      <FilterSelect label="Entry pass" value={pass} onChange={(v) => setParam({ pass: v })} options={PASS_FILTERS} />
       <FilterSelect
         label="District"
         value={district}
@@ -577,8 +499,8 @@ export default function Dashboard() {
 
   const tabs: Array<[string, string, number | undefined]> = [
     ['', 'All', s.total],
-    ['submitted', 'Awaiting confirmation', s.awaitingConfirmation],
-    ['confirmed', 'Confirmed', s.confirmed],
+    ['issued', 'Pass issued', s.passesIssued],
+    ['missing', 'No pass yet', s.withoutPass],
   ];
 
   return (
@@ -598,15 +520,15 @@ export default function Dashboard() {
           <p className="mt-2 max-w-xl text-[15px] leading-relaxed text-slate-500">
             {!stats
               ? 'Loading the latest numbers…'
-              : stats.awaitingConfirmation
-                ? `${stats.awaitingConfirmation} registration${stats.awaitingConfirmation === 1 ? ' is' : 's are'} awaiting confirmation. Confirming one generates its entry pass and sends it on WhatsApp.`
-                : 'Every registration is confirmed. New submissions will appear here.'}
+              : stats.withoutPass
+                ? `${stats.withoutPass} registration${stats.withoutPass === 1 ? ' has' : 's have'} no entry pass yet. Open ${stats.withoutPass === 1 ? 'it' : 'them'} to generate the pass.`
+                : 'Registrants get their entry pass as soon as they submit the form. New registrations appear here.'}
           </p>
         </div>
-        {stats && stats.awaitingConfirmation > 0 && canApprove && (
-          <Button onClick={() => setParam({ status: 'submitted', passStatus: '' })} className="shadow-glow md:shrink-0">
-            <BadgeCheck className="h-4 w-4" aria-hidden /> Review awaiting
-            <span className="rounded-full bg-white/20 px-1.5 text-[11px] font-bold leading-[18px]">{stats.awaitingConfirmation}</span>
+        {stats && stats.withoutPass > 0 && canSend && (
+          <Button onClick={() => setParam({ pass: 'missing' })} className="shadow-glow md:shrink-0">
+            <Ticket className="h-4 w-4" aria-hidden /> Show without pass
+            <span className="rounded-full bg-white/20 px-1.5 text-[11px] font-bold leading-[18px]">{stats.withoutPass}</span>
           </Button>
         )}
       </section>
@@ -620,72 +542,43 @@ export default function Dashboard() {
           icon={Users}
           tone="ink"
           note={stats ? 'All time' : ''}
-          active={!status && !passStatus}
-          onClick={() => setParam({ status: '', passStatus: '' })}
+          active={!pass}
+          onClick={() => setParam({ pass: '' })}
           delay={0}
         />
         <StatCard
-          label="Awaiting Confirmation"
-          value={s.awaitingConfirmation}
+          label="Entry Passes Issued"
+          value={s.passesIssued}
           total={s.total}
-          icon={Hourglass}
-          tone="amber"
-          note={stats ? (stats.awaitingConfirmation ? 'Needs your review' : 'All caught up') : ''}
-          active={status === 'submitted' && !passStatus}
-          onClick={() => setParam({ status: status === 'submitted' ? '' : 'submitted', passStatus: '' })}
+          icon={Ticket}
+          tone="green"
+          note={pct(s.passesIssued)}
+          active={pass === 'issued'}
+          onClick={() => setParam({ pass: pass === 'issued' ? '' : 'issued' })}
           delay={40}
         />
         <StatCard
-          label="Confirmed Registrations"
-          value={s.confirmed}
+          label="Without Entry Pass"
+          value={s.withoutPass}
           total={s.total}
-          icon={BadgeCheck}
-          tone="wine"
-          note={pct(s.confirmed)}
-          active={status === 'confirmed' && !passStatus}
-          onClick={() => setParam({ status: status === 'confirmed' ? '' : 'confirmed', passStatus: '' })}
+          icon={TriangleAlert}
+          tone="amber"
+          note={stats ? (stats.withoutPass ? 'Generate their pass' : 'All have a pass') : ''}
+          active={pass === 'missing'}
+          onClick={() => setParam({ pass: pass === 'missing' ? '' : 'missing' })}
           delay={80}
         />
         <StatCard
-          label="Entry Passes Sent"
-          value={s.passesSent}
-          total={s.confirmed}
-          icon={SendHorizontal}
-          tone="green"
-          note={
-            stats?.passSendFailed ? (
-              <span className="font-semibold text-red-600">{stats.passSendFailed} failed to send</span>
-            ) : stats ? (
-              'Accepted by DXing'
-            ) : (
-              ''
-            )
-          }
-          active={passStatus === 'sent'}
-          onClick={() => setParam({ passStatus: passStatus === 'sent' ? '' : 'sent', status: '' })}
+          label="Accompanying Children"
+          value={s.children}
+          total={s.children}
+          icon={Baby}
+          tone="wine"
+          note={stats ? 'Across all registrations' : ''}
+          active={false}
           delay={120}
         />
       </div>
-
-      <WorkflowStrip stats={stats} onPick={(q) => setParam(q)} />
-
-      {stats && stats.failedMessages > 0 && (
-        <div className="mt-5">
-          <Alert
-            tone="warning"
-            title={`${stats.failedMessages} WhatsApp message${stats.failedMessages === 1 ? '' : 's'} failed`}
-            action={
-              stats.passSendFailed > 0 && (
-                <Button size="sm" variant="secondary" className="w-full" onClick={() => setParam({ passStatus: 'send_failed', status: '' })}>
-                  Show failed passes
-                </Button>
-              )
-            }
-          >
-            Confirmed registrations and generated passes are kept. Open a registration to see the error and retry.
-          </Alert>
-        </div>
-      )}
 
       {/* Registrations */}
       <section className="card relative mt-5 overflow-hidden" aria-labelledby="list-title">
@@ -701,25 +594,25 @@ export default function Dashboard() {
               <h2 id="list-title" className="display text-[26px] leading-tight">
                 Registrations
               </h2>
-              <p className="text-[13px] text-slate-500">Search, filter and confirm registrations.</p>
+              <p className="text-[13px] text-slate-500">Search and filter registrations.</p>
             </div>
             {/* Status tabs */}
-            <div role="tablist" aria-label="Registration status" className="scrollbar-none -mx-1 flex max-w-full gap-1 overflow-x-auto px-1">
+            <div role="tablist" aria-label="Entry pass" className="scrollbar-none -mx-1 flex max-w-full gap-1 overflow-x-auto px-1">
               {tabs.map(([v, l, n]) => (
                 <button
                   key={v || 'all'}
                   type="button"
                   role="tab"
-                  aria-selected={status === v}
-                  onClick={() => setParam({ status: v })}
+                  aria-selected={pass === v}
+                  onClick={() => setParam({ pass: v })}
                   className={cx(
                     'inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition',
-                    status === v ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 hover:text-slate-900'
+                    pass === v ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-50 hover:text-slate-900'
                   )}
                 >
                   {l}
                   {n !== undefined && (
-                    <span className={cx('rounded-full px-1.5 text-[11px] tabular-nums', status === v ? 'bg-white/20' : 'bg-slate-100 text-slate-500')}>{n}</span>
+                    <span className={cx('rounded-full px-1.5 text-[11px] tabular-nums', pass === v ? 'bg-white/20' : 'bg-slate-100 text-slate-500')}>{n}</span>
                   )}
                 </button>
               ))}
@@ -834,12 +727,12 @@ export default function Dashboard() {
                     className={cx(
                       'min-w-0 animate-fade-up rounded-2xl border border-slate-200/80 bg-white p-4 shadow-panel',
                       r.id === flashId && 'animate-flash',
-                      r.status === 'submitted' && 'border-l-4 border-l-amber-400'
+                      !r.hasPass && 'border-l-4 border-l-amber-400'
                     )}
                     style={{ animationDelay: `${Math.min(i, 8) * 25}ms` }}
                   >
                     <div className="flex items-start gap-3">
-                      <Avatar name={r.name} className="h-11 w-11 text-sm" />
+                      <Avatar name={r.name} src={r.photoUrl} className="h-11 w-11 text-sm" />
                       <div className="min-w-0 flex-1">
                         <Link to={`/admin/registrations/${r.id}`} state={back} className="block truncate font-semibold text-slate-900 hover:text-brand-700">
                           {r.name}
@@ -849,7 +742,6 @@ export default function Dashboard() {
                           {r.childrenCount ? ` · ${childrenLabel(r.childrenCount)}` : ''}
                         </p>
                       </div>
-                      <StatusBadge status={r.status} />
                     </div>
                     <dl className="mt-3 space-y-1.5 rounded-xl bg-slate-50 p-3 text-[13px] text-slate-600">
                       <div className="flex min-w-0 items-center gap-2">
@@ -869,17 +761,17 @@ export default function Dashboard() {
                         <dt className="sr-only">Location</dt>
                         <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
                         <dd className="truncate">
-                          <span className="font-medium text-slate-700">{r.district}</span> · {r.area} · {r.unit}
-                          {r.place && ` · ${r.place}`}
+                          <span className="font-medium text-slate-700">{r.district}</span>
+                          {[r.area, r.unit, r.place].filter(Boolean).map((v) => ` · ${v}`)}
                         </dd>
                       </div>
                     </dl>
                     <div className="mt-3 flex items-center justify-between gap-2">
-                      <PassBadge status={r.passStatus} />
+                      <PassBadge hasPass={r.hasPass} />
                       <span className="text-xs text-slate-400">{formatDate(r.createdAt)}</span>
                     </div>
                     <div className="mt-3">
-                      <RowActions r={r} layout="card" canApprove={canApprove} canSend={canSend} back={back} onAction={ask} onViewPass={setViewing} />
+                      <RowActions r={r} layout="card" canSend={canSend} back={back} onGenerate={ask} onViewPass={setViewing} />
                     </div>
                   </li>
                 ))}
@@ -898,9 +790,6 @@ export default function Dashboard() {
                       <SortHeader label="District" sortKey="district" sort={sort} dir={dir} onSort={onSort} />
                       <SortHeader label="Registered" sortKey="createdAt" sort={sort} dir={dir} onSort={onSort} className="hidden xl:table-cell" />
                       <th scope="col" className="px-3 py-3">
-                        Status
-                      </th>
-                      <th scope="col" className="px-3 py-3">
                         Entry pass
                       </th>
                       <th scope="col" className="py-3 pl-3 pr-6 text-right">
@@ -914,8 +803,8 @@ export default function Dashboard() {
                         <td className="py-3.5 pl-6 pr-3">
                           <div className="flex items-center gap-3">
                             <span className="relative">
-                              <Avatar name={r.name} className="h-10 w-10 text-xs" />
-                              {r.status === 'submitted' && (
+                              <Avatar name={r.name} src={r.photoUrl} className="h-10 w-10 text-xs" />
+                              {!r.hasPass && (
                                 <span aria-hidden className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-amber-400 ring-2 ring-white" />
                               )}
                             </span>
@@ -946,9 +835,9 @@ export default function Dashboard() {
                         <td className="hidden px-3 py-3.5 tabular-nums text-slate-700 xl:table-cell">{r.age}</td>
                         <td className="px-3 py-3.5">
                           <div className="font-medium text-slate-800">{r.district}</div>
-                          <div className="max-w-[11rem] truncate text-xs text-slate-500">
-                            {r.area} · {r.unit}
-                          </div>
+                          {(r.area || r.unit) && (
+                            <div className="max-w-[11rem] truncate text-xs text-slate-500">{[r.area, r.unit].filter(Boolean).join(' · ')}</div>
+                          )}
                           {(r.place || Boolean(r.childrenCount)) && (
                             <div className="max-w-[11rem] truncate text-xs text-slate-500">
                               {[r.place, r.childrenCount ? childrenLabel(r.childrenCount) : ''].filter(Boolean).join(' · ')}
@@ -957,13 +846,10 @@ export default function Dashboard() {
                         </td>
                         <td className="hidden whitespace-nowrap px-3 py-3.5 text-slate-600 xl:table-cell">{formatDate(r.createdAt)}</td>
                         <td className="px-3 py-3.5">
-                          <StatusBadge status={r.status} />
-                        </td>
-                        <td className="px-3 py-3.5">
-                          <PassBadge status={r.passStatus} />
+                          <PassBadge hasPass={r.hasPass} />
                         </td>
                         <td className="py-3.5 pl-3 pr-6">
-                          <RowActions r={r} layout="row" canApprove={canApprove} canSend={canSend} back={back} onAction={ask} onViewPass={setViewing} />
+                          <RowActions r={r} layout="row" canSend={canSend} back={back} onGenerate={ask} onViewPass={setViewing} />
                         </td>
                       </tr>
                     ))}
@@ -1052,7 +938,7 @@ export default function Dashboard() {
       </Dialog>
 
       {dialog}
-      <PassViewer target={viewing} canSend={canSend} onClose={() => setViewing(null)} onResend={(t) => ask('resend', t as RegistrationItem)} />
+      <PassViewer target={viewing} onClose={() => setViewing(null)} />
     </main>
   );
 }

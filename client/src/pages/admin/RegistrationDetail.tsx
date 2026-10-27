@@ -1,51 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
-import {
-  ArrowLeft,
-  BadgeCheck,
-  CheckCircle2,
-  Clock,
-  Expand,
-  FileCheck2,
-  History,
-  MessageCircle,
-  RefreshCw,
-  Send,
-  Ticket,
-  XCircle,
-} from 'lucide-react';
+import { ArrowLeft, Expand, FileCheck2, History, Ticket } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import type { RegistrationDetail as Detail } from '../../lib/types';
-import { PASS_LABEL, STATUS_LABEL, TEMPLATE_LABEL, formatDateTime } from '../../lib/format';
-import { Alert, Avatar, Button, PassBadge, Skeleton, StatusBadge, cx, useToast } from '../../components/ui';
-import { DownloadPassLink, PassImage, PassViewer, useRegistrationActions, useReportResult } from '../../components/RegistrationActions';
-import type { ActionKind } from '../../components/RegistrationActions';
+import { STATUS_LABEL, formatDateTime } from '../../lib/format';
+import { Alert, Avatar, Button, PassBadge, Skeleton } from '../../components/ui';
+import { DownloadPassLink, PassImage, PassViewer, useGeneratePass } from '../../components/RegistrationActions';
 import { useLayout } from './AdminLayout';
 
 // Registrations from the original form have no gender, place, WhatsApp
 // number or children.
 const NOT_RECORDED = 'Not recorded';
 
-const MSG_STATUS = {
-  accepted: { label: 'Accepted by DXing', cls: 'text-emerald-700 bg-emerald-50', Icon: CheckCircle2 },
-  failed: { label: 'Failed', cls: 'text-red-700 bg-red-50', Icon: XCircle },
-  sending: { label: 'Sending', cls: 'text-amber-700 bg-amber-50', Icon: Clock },
-} as const;
-
-function availableActions(d: Detail): ActionKind[] {
-  const { status } = d.registration;
-  const out: ActionKind[] = [];
-  if (status === 'submitted' && d.permissions.approve) out.push('confirm');
-  if (status === 'confirmed' && d.permissions.send) out.push(d.pass?.status === 'active' ? 'resend' : 'generate');
-  return out;
+function childrenText(children: Detail['registration']['children']) {
+  if (children === null) return NOT_RECORDED;
+  if (children.length === 0) return 'None';
+  return children.map((c) => (c.name ? `${c.name} (age ${c.age})` : `Age ${c.age}`)).join(', ');
 }
-
-const ACTION_BUTTON: Record<ActionKind, { label: string; icon: ComponentType<{ className?: string }> }> = {
-  confirm: { label: 'Confirm Registration', icon: BadgeCheck },
-  resend: { label: 'Resend entry pass', icon: Send },
-  generate: { label: 'Generate entry pass', icon: Ticket },
-};
 
 function Card({ title, icon: Icon, children, aside }: { title: string; icon: ComponentType<{ className?: string }>; children: ReactNode; aside?: ReactNode }) {
   return (
@@ -63,12 +35,9 @@ function Card({ title, icon: Icon, children, aside }: { title: string; icon: Com
 
 export default function RegistrationDetail() {
   const { id = '' } = useParams();
-  const toast = useToast();
-  const report = useReportResult();
   const { refreshStats } = useLayout();
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState('');
-  const [retrying, setRetrying] = useState<string | null>(null);
   const [imgKey, setImgKey] = useState(0);
   const [viewing, setViewing] = useState(false);
 
@@ -81,27 +50,11 @@ export default function RegistrationDetail() {
 
   useEffect(load, [load]);
 
-  const { ask, dialog } = useRegistrationActions((res) => {
+  const { ask, dialog } = useGeneratePass((res) => {
     setDetail(res);
     setImgKey((k) => k + 1);
     refreshStats();
   });
-
-  async function retry(nid: string) {
-    if (retrying) return;
-    setRetrying(nid);
-    try {
-      const res = await api<Detail>(`/api/admin/registrations/${id}/notifications/${nid}/retry`, { method: 'POST' });
-      setDetail(res);
-      report(res, 'Message sent again');
-      refreshStats();
-    } catch (err) {
-      toast('error', errorMessage(err));
-      load();
-    } finally {
-      setRetrying(null);
-    }
-  }
 
   if (error) {
     return (
@@ -125,32 +78,14 @@ export default function RegistrationDetail() {
   if (!detail) return <DetailSkeleton />;
 
   const r = detail.registration;
-  const actions = availableActions(detail);
-  const hasPass = detail.pass?.status === 'active';
+  const hasPass = detail.pass?.status === 'active' && r.hasPass;
+  const canGenerate = !r.hasPass && detail.permissions.send;
 
-  const steps = [
-    { label: 'Submitted', at: r.createdAt, done: true, failed: false },
-    { label: 'Confirmed', at: r.confirmedAt, done: r.status === 'confirmed', failed: false },
-    { label: 'Pass generated', at: r.passGeneratedAt, done: r.status === 'confirmed' && r.passStatus !== 'not_generated', failed: false },
-    {
-      label: r.passStatus === 'send_failed' ? 'Pass send failed' : 'Pass sent',
-      at: r.passStatus === 'send_failed' ? null : r.passSentAt,
-      done: r.passStatus === 'sent',
-      failed: r.passStatus === 'send_failed',
-    },
-  ];
-
-  const actionButtons = (full: boolean) =>
-    actions.map((a) => {
-      const def = ACTION_BUTTON[a];
-      const primary = a === 'confirm' || a === 'generate' || r.passStatus === 'send_failed';
-      return (
-        <Button key={a} variant={primary ? 'primary' : 'secondary'} onClick={() => ask(a, r)} className={full ? 'flex-1' : ''}>
-          <def.icon className="h-4 w-4" aria-hidden />
-          {a === 'resend' && r.passStatus === 'send_failed' ? 'Retry sending pass' : def.label}
-        </Button>
-      );
-    });
+  const generateButton = (full: boolean) => (
+    <Button onClick={() => ask(r)} className={full ? 'flex-1' : ''}>
+      <Ticket className="h-4 w-4" aria-hidden /> Generate entry pass
+    </Button>
+  );
 
   return (
     <main className="mx-auto max-w-6xl px-4 pb-28 pt-5 sm:px-6 md:pb-16 lg:px-8 lg:pt-7">
@@ -160,57 +95,33 @@ export default function RegistrationDetail() {
       <div className="card mt-4 animate-fade-up p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-4">
-            <Avatar name={r.name} className="h-14 w-14 text-lg" />
+            {r.photoUrl ? (
+              // Opens the full photo, to compare with the person at the desk.
+              <a href={r.photoUrl} target="_blank" rel="noreferrer" className="shrink-0 rounded-2xl focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-600/20" title="Open the full photo">
+                <img src={r.photoUrl} alt={`Photo of ${r.name}`} className="h-24 w-[4.8rem] rounded-2xl object-cover ring-1 ring-slate-200" />
+              </a>
+            ) : (
+              <Avatar name={r.name} className="h-14 w-14 text-lg" />
+            )}
             <div className="min-w-0">
               <h1 className="display break-words text-[30px] leading-[1.1] sm:text-[38px]">{r.name}</h1>
               <p className="mt-0.5 text-sm text-slate-500">
                 <span className="font-mono font-medium text-slate-700">{r.regNo}</span> · Registered {formatDateTime(r.createdAt)}
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
-                <StatusBadge status={r.status} />
-                <PassBadge status={r.passStatus} />
+                <PassBadge hasPass={r.hasPass} />
               </div>
             </div>
           </div>
-          {actions.length > 0 && <div className="hidden gap-2 md:flex">{actionButtons(false)}</div>}
+          {canGenerate && <div className="hidden gap-2 md:flex">{generateButton(false)}</div>}
         </div>
 
-        {/* Workflow progress */}
-        <ol className="mt-6 grid grid-cols-4 gap-2" aria-label="Workflow progress">
-          {steps.map((s, i) => (
-            <li key={s.label} className="min-w-0">
-              <span
-                className={cx(
-                  'block h-1.5 rounded-full transition-colors duration-500',
-                  s.failed ? 'bg-red-400' : s.done ? 'bg-brand-500' : 'bg-slate-200'
-                )}
-              />
-              <span className="mt-2 flex items-center gap-1.5">
-                <span
-                  className={cx(
-                    'hidden h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold sm:flex',
-                    s.failed ? 'bg-red-100 text-red-700' : s.done ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-400'
-                  )}
-                >
-                  {s.failed ? '!' : i + 1}
-                </span>
-                <span className={cx('truncate text-[11px] font-semibold sm:text-xs', s.failed ? 'text-red-700' : s.done ? 'text-slate-900' : 'text-slate-400')}>
-                  {s.label}
-                </span>
-              </span>
-              <span className="mt-0.5 hidden text-[11px] text-slate-500 sm:block">{s.done && s.at ? formatDateTime(s.at) : ' '}</span>
-            </li>
-          ))}
-        </ol>
-
-        {r.status === 'submitted' && (
+        {!r.hasPass && (
           <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-inset ring-amber-200/70">
-            Awaiting confirmation. {detail.permissions.approve ? 'Review the details, then confirm the registration.' : 'An admin needs to confirm this registration.'}
-          </p>
-        )}
-        {r.passStatus === 'send_failed' && (
-          <p className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800 ring-1 ring-inset ring-red-200/70">
-            The entry pass was generated and saved, but WhatsApp sending failed. See the messages below for the reason, then retry.
+            {r.status === 'submitted'
+              ? 'This registration was made before entry passes were generated automatically.'
+              : 'The entry pass could not be generated when this registration was submitted.'}{' '}
+            {detail.permissions.send ? 'Generate it now.' : 'An admin needs to generate it.'}
           </p>
         )}
       </div>
@@ -224,23 +135,18 @@ export default function RegistrationDetail() {
                 ['Age', String(r.age)],
                 ['Gender', r.gender ?? NOT_RECORDED],
                 ['Phone number', r.mobileDisplay],
-                ['WhatsApp number', r.whatsappDisplay ? (r.whatsapp === r.mobile ? `${r.whatsappDisplay} (same as phone)` : r.whatsappDisplay) : `${NOT_RECORDED}; messages go to the phone number`],
+                ['WhatsApp number', r.whatsappDisplay ? (r.whatsapp === r.mobile ? `${r.whatsappDisplay} (same as phone)` : r.whatsappDisplay) : NOT_RECORDED],
                 ['Email', r.email],
                 ['Place', r.place ?? NOT_RECORDED],
                 ['District', r.district],
-                ['Area', r.area],
-                ['Unit', r.unit],
+                ['Area', r.area || 'Not given'],
+                ['Unit', r.unit || 'Not given'],
                 [
-                  'Accompanying children',
-                  r.childrenCount === null
-                    ? NOT_RECORDED
-                    : r.childrenCount === 0
-                      ? 'None'
-                      : `${r.childrenCount}${r.childAges ? ` (ages ${r.childAges.join(', ')})` : ''}`,
+                  r.childrenCount ? `Accompanying children (${r.childrenCount})` : 'Accompanying children',
+                  // Names and ages are visible to admins only.
+                  r.children ? childrenText(r.children) : r.childrenCount === null ? NOT_RECORDED : String(r.childrenCount),
                 ],
                 ['Registration no.', r.regNo],
-                ['Status', STATUS_LABEL[r.status] ?? r.status],
-                ['Confirmed', r.confirmedAt ? `${formatDateTime(r.confirmedAt)}${r.confirmedByName ? ` by ${r.confirmedByName}` : ''}` : 'Not yet'],
               ].map(([k, v]) => (
                 <div key={k} className="min-w-0">
                   <dt className="label-caps">{k}</dt>
@@ -248,42 +154,6 @@ export default function RegistrationDetail() {
                 </div>
               ))}
             </dl>
-          </Card>
-
-          <Card title="WhatsApp messages" icon={MessageCircle}>
-            {detail.notifications.length === 0 ? (
-              <p className="text-sm text-slate-500">No messages yet.</p>
-            ) : (
-              <ul className="divide-y divide-slate-100">
-                {detail.notifications.map((n) => {
-                  const st = MSG_STATUS[n.status];
-                  return (
-                    <li key={n.id} className="py-3 first:pt-0 last:pb-0">
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-slate-900">{TEMPLATE_LABEL[n.template] ?? n.template}</p>
-                          <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                            <span className={cx('inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold', st.cls)}>
-                              <st.Icon className="h-3.5 w-3.5" aria-hidden /> {st.label}
-                            </span>
-                            {formatDateTime(n.acceptedAt ?? n.updatedAt)} · {n.attempts} attempt{n.attempts === 1 ? '' : 's'} · by {n.triggeredByName}
-                          </p>
-                        </div>
-                        {n.status === 'failed' && detail.permissions.send && (
-                          <Button size="sm" variant="secondary" loading={retrying === n.id} disabled={Boolean(retrying)} onClick={() => retry(n.id)}>
-                            <RefreshCw className="h-4 w-4" aria-hidden /> Retry
-                          </Button>
-                        )}
-                      </div>
-                      {n.lastError && n.status === 'failed' && <p className="mt-2 rounded-lg bg-red-50 p-2.5 text-[13px] text-red-800">{n.lastError}</p>}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            <p className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-500">
-              “Accepted by DXing” means DXing accepted the request. DXing does not report whether the message reached the phone.
-            </p>
           </Card>
 
           <Card title="History" icon={History}>
@@ -318,19 +188,9 @@ export default function RegistrationDetail() {
                 </button>
                 <dl className="mt-4 space-y-1.5 text-[13px]">
                   <div className="flex justify-between gap-2">
-                    <dt className="text-slate-500">Status</dt>
-                    <dd className="font-medium text-slate-800">{PASS_LABEL[r.passStatus]}</dd>
-                  </div>
-                  <div className="flex justify-between gap-2">
                     <dt className="text-slate-500">Generated</dt>
                     <dd className="text-slate-800">{formatDateTime(r.passGeneratedAt ?? detail.pass.issuedAt)}</dd>
                   </div>
-                  {r.passSentAt && (
-                    <div className="flex justify-between gap-2">
-                      <dt className="text-slate-500">Last sent</dt>
-                      <dd className="text-slate-800">{formatDateTime(r.passSentAt)}</dd>
-                    </div>
-                  )}
                 </dl>
                 <div className="mt-4 grid grid-cols-2 gap-2">
                   <Button variant="secondary" onClick={() => setViewing(true)}>
@@ -342,11 +202,7 @@ export default function RegistrationDetail() {
             ) : (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
                 <Ticket className="mx-auto h-7 w-7 text-brand-300" aria-hidden />
-                <p className="mt-2 text-sm text-slate-500">
-                  {r.status === 'confirmed'
-                    ? 'No pass yet. Generation failed; use "Generate entry pass".'
-                    : 'The entry pass is generated automatically when the registration is confirmed.'}
-                </p>
+                <p className="mt-2 text-sm text-slate-500">No pass yet. Use “Generate entry pass”.</p>
               </div>
             )}
           </Card>
@@ -354,14 +210,14 @@ export default function RegistrationDetail() {
       </div>
 
       {/* Sticky action bar on phones */}
-      {actions.length > 0 && (
+      {canGenerate && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-slate-50/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur md:hidden">
-          <div className="mx-auto flex max-w-5xl gap-2">{actionButtons(true)}</div>
+          <div className="mx-auto flex max-w-5xl gap-2">{generateButton(true)}</div>
         </div>
       )}
 
       {dialog}
-      <PassViewer target={viewing ? r : null} canSend={detail.permissions.send} onClose={() => setViewing(false)} onResend={(t) => ask('resend', t)} />
+      <PassViewer target={viewing ? r : null} onClose={() => setViewing(false)} />
     </main>
   );
 }

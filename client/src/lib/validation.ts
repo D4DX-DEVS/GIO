@@ -1,6 +1,7 @@
 // Registration form rules. These mirror server/src/services/validation.js for
 // instant feedback; the server re-validates everything and has the final say.
 // Nothing here changes what the user typed to make it pass.
+import { mobileError } from './phone';
 
 export type FormValues = {
   name: string;
@@ -15,19 +16,23 @@ export type FormValues = {
   email: string;
 };
 export type FieldKey = keyof FormValues;
-export type Errors = Partial<Record<FieldKey | 'childrenCount' | `childAges.${number}`, string>>;
+export type Child = { name: string; age: string };
+export type Errors = Partial<
+  Record<FieldKey | 'photo' | 'mobileCountry' | 'whatsappCountry' | 'childrenCount' | `children.${number}.name` | `children.${number}.age`, string>
+>;
 
-export type Country = { dial: string; iso: string; name: string; lengths: number[]; starts: string };
-// `country` is the event's default country; the form asks for the national number only.
+// The form asks for the national number only; the country of each number is
+// picked from a list (ISO code such as "IN").
 export type Rules = {
   ageMin: number;
   ageMax: number;
   districts: string[];
-  country?: Country;
-  // Set by admins; an empty list / null means the question is not asked.
+  mobileCountry: string;
+  whatsappCountry: string;
+  // Set by admins; an empty list means the question is not asked.
   genderOptions: string[];
   placeRequired: boolean;
-  children: { max: number; ageMin: number; ageMax: number } | null;
+  children: { max: number; ageMin: number; ageMax: number };
   // "Same as phone number" ticked: the WhatsApp field is not used.
   sameAsMobile: boolean;
 };
@@ -41,17 +46,6 @@ const DIGITS = /^\d+$/;
 
 const collapse = (s: string) => s.replace(/\s+/g, ' ').trim();
 
-/** Same rule as server/src/utils/phone.js: an error message, or undefined when valid. */
-export function mobileError(raw: string, country?: Country, kind: 'mobile' | 'WhatsApp' = 'mobile'): string | undefined {
-  const v = raw.trim();
-  if (!v) return kind === 'mobile' ? 'Please enter your phone number' : 'Please enter your WhatsApp number';
-  if (!DIGITS.test(v)) return kind === 'mobile' ? 'Mobile number can contain digits only' : 'WhatsApp number can contain digits only';
-  if (!country) return undefined;
-  if (!country.lengths.includes(v.length)) return `Enter a valid ${country.lengths.join(' or ')}-digit ${kind} number`;
-  if (!country.starts.includes(v[0])) return `Enter a valid ${kind} number`;
-  return undefined;
-}
-
 export function matchDistrict(value: string, districts: string[]) {
   const key = value.trim().toLocaleLowerCase('en');
   return districts.find((d) => d.toLocaleLowerCase('en') === key) ?? null;
@@ -59,16 +53,18 @@ export function matchDistrict(value: string, districts: string[]) {
 
 const NAME_SYMBOLS = 'Name can contain only letters and spaces (no numbers or special characters)';
 
+function nameError(raw: string, empty: string) {
+  const v = collapse(raw);
+  if (!v) return empty;
+  if (/\p{N}/u.test(v)) return 'Name cannot contain numbers';
+  if (!NAME_RE.test(v)) return NAME_SYMBOLS;
+  if (v.length < 2) return 'Name must be at least 2 characters';
+  if (v.length > 120) return 'Name must be at most 120 characters';
+  return undefined;
+}
+
 const validators: Record<FieldKey, (v: string, r: Rules) => string | undefined> = {
-  name(raw) {
-    const v = collapse(raw);
-    if (!v) return 'Please enter your name';
-    if (/\p{N}/u.test(v)) return 'Name cannot contain numbers';
-    if (!NAME_RE.test(v)) return NAME_SYMBOLS;
-    if (v.length < 2) return 'Name must be at least 2 characters';
-    if (v.length > 120) return 'Name must be at most 120 characters';
-    return undefined;
-  },
+  name: (raw) => nameError(raw, 'Please enter your name'),
   age(raw, r) {
     const v = raw.trim();
     if (!v) return 'Please enter your age';
@@ -89,14 +85,15 @@ const validators: Record<FieldKey, (v: string, r: Rules) => string | undefined> 
     if (!matchDistrict(raw, r.districts)) return 'Select a district from the list';
     return undefined;
   },
-  area: (raw) => place(raw, 'area'),
-  unit: (raw) => place(raw, 'unit'),
+  // Optional: checked only when something is typed.
+  area: (raw) => (raw.trim() ? place(raw, 'area') : undefined),
+  unit: (raw) => (raw.trim() ? place(raw, 'unit') : undefined),
   mobile(raw, r) {
-    return mobileError(raw, r.country);
+    return mobileError(raw, r.mobileCountry);
   },
   whatsapp(raw, r) {
     if (r.sameAsMobile) return undefined;
-    return mobileError(raw, r.country, 'WhatsApp');
+    return mobileError(raw, r.whatsappCountry, 'WhatsApp');
   },
   email(raw) {
     const v = raw.trim();
@@ -121,9 +118,10 @@ export function validateField(key: FieldKey, value: string, rules: Rules) {
   return validators[key](value, rules);
 }
 
+export const childNameError = (raw: string) => nameError(raw, 'Please enter the name');
+
 export function childAgeError(raw: string, rules: Rules): string | undefined {
   const c = rules.children;
-  if (!c) return undefined;
   const v = raw.trim();
   if (!v) return 'Please enter the age';
   if (!/^\d+$/.test(v)) return 'Age must contain numbers only';
@@ -131,15 +129,28 @@ export function childAgeError(raw: string, rules: Rules): string | undefined {
   return undefined;
 }
 
-export function validateAll(values: FormValues, childAges: string[], rules: Rules): Errors {
+/** The typed number of children, or an error. */
+export function childrenCountError(raw: string, rules: Rules): string | undefined {
+  const v = raw.trim();
+  if (!v) return undefined; // empty means none
+  if (!/^\d+$/.test(v)) return 'Enter the number of children as a whole number';
+  if (+v > rules.children.max) return `At most ${rules.children.max} accompanying children`;
+  return undefined;
+}
+
+export function validateAll(values: FormValues, childrenCount: string, children: Child[], rules: Rules): Errors {
   const out: Errors = {};
   for (const key of FIELD_ORDER) {
     const e = validators[key](values[key], rules);
     if (e) out[key] = e;
   }
-  childAges.forEach((a, i) => {
-    const e = childAgeError(a, rules);
-    if (e) out[`childAges.${i}`] = e;
+  const countErr = childrenCountError(childrenCount, rules);
+  if (countErr) out.childrenCount = countErr;
+  children.forEach((c, i) => {
+    const n = childNameError(c.name);
+    if (n) out[`children.${i}.name`] = n;
+    const a = childAgeError(c.age, rules);
+    if (a) out[`children.${i}.age`] = a;
   });
   return out;
 }

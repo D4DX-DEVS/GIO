@@ -1,21 +1,8 @@
-import type { PassStatus, Status } from './types';
+import type { Status } from './types';
 
 export const STATUS_LABEL: Record<Status, string> = {
   submitted: 'Submitted',
   confirmed: 'Confirmed',
-};
-
-export const PASS_LABEL: Record<PassStatus, string> = {
-  not_generated: 'No pass yet',
-  generated: 'Pass generated',
-  sent: 'Pass sent',
-  send_failed: 'Pass send failed',
-};
-
-export const TEMPLATE_LABEL: Record<string, string> = {
-  registration_submitted: 'Registration acknowledgement',
-  registration_confirmed: 'Registration confirmation',
-  entry_pass: 'Entry pass',
 };
 
 const dateFmt = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' });

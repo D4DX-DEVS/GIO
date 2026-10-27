@@ -71,7 +71,7 @@ async function importImage({ file, alt }) {
 (async () => {
   if (!env.mongoUri) throw new Error('MONGODB_URI is not set');
   console.log(`Database: ${env.mongoUri.replace(/\/\/[^@/]*@/, '//<credentials>@')}`);
-  console.log(`Image storage: ${env.assets.storage}${env.assets.storage === 'local' ? ` (${env.assets.dir})` : ''}`);
+  console.log(`Image storage: DigitalOcean Spaces, bucket ${env.spaces.bucket}${env.spaces.folder ? `, folder ${env.spaces.folder}` : ''}`);
   await mongoose.connect(env.mongoUri);
 
   const existing = await SiteSettings.findById('site').lean();
@@ -88,7 +88,7 @@ async function importImage({ file, alt }) {
       console.log('Created the draft.');
       if (publish) {
         await content.publishSettings(saved.version, actor);
-        console.log('Published. The website, WhatsApp messages and new pass images now use these details.');
+        console.log('Published. The website and new entry passes now use these details.');
       } else {
         console.log('Not published. Review it in Admin > Website, then publish.');
       }

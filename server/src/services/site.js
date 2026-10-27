@@ -10,6 +10,7 @@
 const { SiteSettings, ContentItem, Asset } = require('../models');
 const { env } = require('../config/env');
 const { EMPTY_PAGE, ASSET_FIELDS, plain } = require('../config/siteSchema');
+const store = require('../providers/assetStore');
 
 const CACHE_MS = 15 * 1000;
 let cache = { at: 0, page: undefined };
@@ -71,7 +72,8 @@ async function isRegistrationOpen() {
 
 // --- Website payload ---------------------------------------------------------
 
-const assetUrl = (a) => `/api/assets/${a.key}`;
+// Images are served straight from the Spaces CDN.
+const assetUrl = (a) => store.url(a.key);
 
 function imageView(asset) {
   if (!asset) return null;
