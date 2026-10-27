@@ -9,7 +9,7 @@ import { FALLBACK_SITE, plain } from '../lib/site';
 import { FIELD_ORDER, childAgeError, instantError, matchDistrict, validateAll, validateField } from '../lib/validation';
 import type { Errors, FieldKey, FormValues, Rules } from '../lib/validation';
 import { Button, Dialog } from '../components/ui';
-import { SiteHeader } from '../components/SiteChrome';
+import { BackToTop, SiteHeader } from '../components/SiteChrome';
 
 const EMPTY: FormValues = { name: '', age: '', gender: '', place: '', district: '', area: '', unit: '', mobile: '', whatsapp: '', email: '' };
 
@@ -184,7 +184,6 @@ export default function Register() {
   return (
     <div className="site">
       <SiteHeader
-        logo={page.logo}
         actions={
           <Link to="/" className="hdr-back">
             <span aria-hidden="true">←</span> Conference home
@@ -470,6 +469,7 @@ export default function Register() {
           </aside>
         )}
       </main>
+      <BackToTop />
 
       <Dialog
         open={confirmClear}

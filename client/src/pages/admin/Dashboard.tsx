@@ -159,8 +159,9 @@ function StatCard({
         active && cx('ring-2', t.ring)
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <span className="min-w-0 text-[12px] font-semibold uppercase leading-snug tracking-[0.1em] text-slate-500">{label}</span>
+      {/* On phones the icon sits above the label: "REGISTRATIONS" cannot wrap and is wider than the space beside it. */}
+      <div className="flex flex-col-reverse items-start gap-2.5 sm:flex-row sm:justify-between sm:gap-3">
+        <span className="min-w-0 text-[11px] font-semibold uppercase leading-snug tracking-[0.08em] text-slate-500 sm:text-[12px] sm:tracking-[0.1em]">{label}</span>
         <span className={cx('flex h-9 w-9 shrink-0 items-center justify-center rounded-full ring-1 ring-inset', t.tile)}>
           <Icon className="h-[18px] w-[18px]" />
         </span>
@@ -224,7 +225,7 @@ function WorkflowStrip({ stats, onPick }: { stats: Stats | null; onPick: (q: Rec
               </span>
               <span className="min-w-0">
                 <span className="block font-serif text-[26px] leading-none tabular-nums text-slate-900">{s.n ?? '–'}</span>
-                <span className="mt-1 block truncate text-xs font-semibold text-slate-700">{s.label}</span>
+                <span className="mt-1 block text-xs font-semibold leading-snug text-slate-700 sm:truncate">{s.label}</span>
                 <span className="hidden truncate text-[11px] text-slate-400 sm:block">{s.hint}</span>
               </span>
             </button>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { KeyRound, UserRound } from 'lucide-react';
+import { Eye, EyeOff, KeyRound, UserRound } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import { errorMessage } from '../../lib/api';
 import { Alert, Button, Field } from '../../components/ui';
@@ -13,6 +13,7 @@ export default function Login() {
   const from = (location.state as { from?: string } | null)?.from || '/admin';
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -41,9 +42,10 @@ export default function Login() {
     <main className="flex min-h-dvh items-center justify-center bg-slate-50 px-4 py-10">
       <div className="w-full max-w-[25rem] animate-fade-up">
         <div className="mb-7 flex flex-col items-center text-center">
-          <img src="/brand/gio-logo-maroon.png" alt="GIO Keralam" width={600} height={441} className="h-16 w-auto" />
-          <p className="kicker mt-6">International Conference on Women</p>
-          <h1 className="display mt-2 text-[40px] leading-none">Admin sign in</h1>
+          <a href="/" className="block transition hover:-translate-y-0.5">
+            <img src="/brand/icw-logo-dark.webp" alt="International Conference on Women" width={1120} height={485} className="h-[72px] w-auto sm:h-20" />
+          </a>
+          <h1 className="display mt-7 text-[34px] leading-none sm:text-[40px]">Admin sign in</h1>
           <span aria-hidden className="mt-5 block h-0.5 w-12 bg-brand-600" />
           <p className="mt-4 text-sm text-slate-500">Registrations, entry passes and the conference website</p>
         </div>
@@ -64,14 +66,25 @@ export default function Login() {
             </Field>
             <Field label="Password" icon={KeyRound}>
               {(p) => (
-                <input
-                  {...p}
-                  type="password"
-                  className="input pl-11"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
+                <>
+                  <input
+                    {...p}
+                    type={showPassword ? 'text' : 'password'}
+                    className="input px-11"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-1.5 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/40"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    aria-pressed={showPassword}
+                    onClick={() => setShowPassword((s) => !s)}
+                  >
+                    {showPassword ? <EyeOff className="h-[18px] w-[18px]" aria-hidden /> : <Eye className="h-[18px] w-[18px]" aria-hidden />}
+                  </button>
+                </>
               )}
             </Field>
             {error && <Alert>{error}</Alert>}
@@ -80,6 +93,7 @@ export default function Login() {
             </Button>
           </form>
         </div>
+        <img src="/brand/gio-logo-maroon.png" alt="GIO Keralam" width={600} height={441} className="mx-auto mt-8 h-14 w-auto" />
         <p className="mt-6 text-center text-xs text-slate-500">Admin accounts are created by the system administrator.</p>
         <p className="mt-3 text-center text-xs">
           <a href="/" className="font-semibold text-brand-600 underline-offset-4 hover:underline">

@@ -2,14 +2,16 @@
 // settings (GET /api/public/site). Admins can open /?preview=1 to see drafts
 // and hidden sections, outlined. Optional sections stay hidden until they
 // have published content.
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode, RefObject } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { BookOpen, CalendarDays, Check, ChevronLeft, ChevronRight, FileText, MapPin, Network, Play, QrCode, UserRound, Users } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import '../site.css';
 import { api, ApiError } from '../lib/api';
 import type { ItemStatus, PublicSite, SectionKey } from '../lib/types';
 import { FALLBACK_SITE, Paras, Rich, initialsOf, plain, safeHref, timeRange } from '../lib/site';
-import { Flourish, Leaf, SiteHeader } from '../components/SiteChrome';
+import { BackToTop, LeafMark, SiteHeader } from '../components/SiteChrome';
 
 type State = { site: PublicSite; source: 'live' | 'fallback' | 'preview'; previewError?: string };
 
@@ -41,9 +43,10 @@ function useSite(preview: boolean) {
 }
 
 /**
- * Fades sections in as they scroll into view. Only elements still below the
- * fold are hidden first, and nothing is hidden with reduced motion or without
- * IntersectionObserver, so content is never held back.
+ * Reveals content as it scrolls into view: `.rv` fades up, `.rv-kids` staggers
+ * its children and `.rv-art` slides its background art in. Only elements
+ * still below the fold are hidden first, and nothing is hidden with reduced
+ * motion or without IntersectionObserver, so content is never held back.
  */
 function useReveal(ready: boolean) {
   useEffect(() => {
@@ -58,7 +61,7 @@ function useReveal(ready: boolean) {
         }),
       { rootMargin: '0px 0px -6% 0px', threshold: 0.06 }
     );
-    document.querySelectorAll<HTMLElement>('.site .rv').forEach((el) => {
+    document.querySelectorAll<HTMLElement>('.site .rv, .site .rv-kids, .site .rv-art').forEach((el) => {
       if (el.getBoundingClientRect().top > window.innerHeight) {
         el.classList.add('rv-on');
         io.observe(el);
@@ -86,27 +89,22 @@ const DraftTag = ({ status, label }: { status?: ItemStatus; label?: string }) =>
 
 const draftCls = (status?: ItemStatus) => (status && status !== 'published' ? 'is-draft' : undefined);
 
-function Section({
-  id,
-  label,
-  hidden,
-  tag,
-  tone,
-  className,
-  children,
-}: {
-  id: string;
-  label: string;
-  hidden?: boolean;
-  tag?: string;
-  tone?: 'cream' | 'wine';
-  className?: string;
-  children: ReactNode;
-}) {
-  const cls = ['sec', tone && `tone-${tone}`, hidden && 'is-draft', className].filter(Boolean).join(' ');
+/** Leaf artwork cut from the approved design, at the edges of a band. */
+function Art({ left, right, lazy = true }: { left?: string; right?: string; lazy?: boolean }) {
+  const load = lazy ? ('lazy' as const) : undefined;
   return (
-    <section className={cls} id={id} aria-labelledby={`${id}-label`}>
-      {tone === 'wine' && <Flourish />}
+    <>
+      {left && <img className="art art-l" src={`/brand/bg/${left}.webp`} alt="" aria-hidden="true" loading={load} decoding="async" />}
+      {right && <img className="art art-r" src={`/brand/bg/${right}.webp`} alt="" aria-hidden="true" loading={load} decoding="async" />}
+    </>
+  );
+}
+
+/** Light band with the section name in a left column. */
+function Section({ id, label, hidden, tag, art, children }: { id: string; label: string; hidden?: boolean; tag?: string; art?: boolean; children: ReactNode }) {
+  return (
+    <section className={`sec${art ? ' rv-art' : ''}${hidden ? ' is-draft' : ''}`} id={id} aria-labelledby={`${id}-label`}>
+      {art && <Art left="theme-left" right="theme-right" />}
       <div className="wrap sec-grid">
         <p className="sec-label" id={`${id}-label`}>
           {label}
@@ -127,7 +125,7 @@ function RegisterButton({ open, className = '', large }: { open: boolean; classN
     );
   }
   return (
-    <Link to="/register" className={`btn ${large ? 'lg' : ''} ${className}`}>
+    <Link to="/register" className={`btn btn-reg ${large ? 'lg' : ''} ${className}`}>
       Register now <span className="arr" aria-hidden="true">→</span>
     </Link>
   );
@@ -136,11 +134,14 @@ function RegisterButton({ open, className = '', large }: { open: boolean; classN
 function LoadingPage() {
   return (
     <div className="site" aria-busy="true">
-      <header className="hdr">
+      <div className="band-hdr">
+        <div className="wrap band-hdr-in" style={{ minHeight: 96 }} />
+      </div>
+      <div className="hdr">
         <div className="wrap hdr-in">
-          <span className="sk" style={{ width: 120, height: 40 }} />
+          <span className="sk" style={{ width: 280, maxWidth: '60%', height: 14 }} />
         </div>
-      </header>
+      </div>
       <div className="hero">
         <div className="wrap">
           <span className="sk" style={{ width: 160, height: 12, marginBottom: 20 }} />
@@ -155,7 +156,7 @@ function LoadingPage() {
   );
 }
 
-/** "Being, Becoming, Belonging" becomes a stacked list; anything else stays one line. */
+/** "Being, Becoming, Belonging" becomes separate words; anything else stays one line. */
 function themeWords(title: string) {
   const parts = plain(title)
     .split(',')
@@ -164,7 +165,135 @@ function themeWords(title: string) {
   return parts.length >= 2 && parts.length <= 4 && parts.every((w) => w.split(/\s+/).length <= 2) ? parts : null;
 }
 
-const ROMAN = ['i', 'ii', 'iii', 'iv'];
+/** "15 November 2026" -> "15" over "November 2026"; other formats stay whole. */
+function splitDate(text: string) {
+  const m = /^(\d{1,2}(?:\s*[–-]\s*\d{1,2})?)\s+(.+)$/.exec(text.trim());
+  return m ? { big: m[1], rest: m[2] } : { big: text, rest: '' };
+}
+
+const POSTERS = [
+  { src: '/brand/poster-1.jpg', alt: 'Conference poster with an illustration of women: International Conference on Women, 15 November 2026, Ernakulam' },
+  { src: '/brand/poster-2.jpg', alt: 'Conference poster: International Conference on Women, 15 November 2026, Ernakulam' },
+];
+
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * Hero poster carousel. Slides sit in a scroll-snap track, so touch swipe
+ * works natively and the arrows and dots just scroll it. It advances every
+ * 6 seconds until a visitor uses it, pauses on hover or focus, and never
+ * moves on its own with reduced motion.
+ */
+function PosterSlider({ posters }: { posters: Array<{ src: string; alt: string }> }) {
+  const track = useRef<HTMLDivElement>(null);
+  const [index, setIndex] = useState(0);
+  const [auto, setAuto] = useState(true);
+  const [paused, setPaused] = useState(false);
+  const trackId = useId();
+  const n = posters.length;
+
+  const go = useCallback(
+    (i: number) => {
+      const el = track.current;
+      if (el) el.scrollTo({ left: ((i + n) % n) * el.clientWidth, behavior: reducedMotion() ? 'auto' : 'smooth' });
+    },
+    [n]
+  );
+  const choose = (i: number) => {
+    setAuto(false);
+    go(i);
+  };
+
+  useEffect(() => {
+    if (!auto || paused || n < 2 || reducedMotion()) return undefined;
+    const t = window.setTimeout(() => go(index + 1), 6000);
+    return () => window.clearTimeout(t);
+  }, [auto, paused, index, n, go]);
+
+  return (
+    <div
+      className="poster"
+      role="region"
+      aria-roledescription="carousel"
+      aria-label="Conference posters"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={() => setPaused(false)}
+    >
+      <div className="poster-stage">
+        <div
+          className="poster-track"
+          id={trackId}
+          ref={track}
+          onScroll={(e) => setIndex(Math.round(e.currentTarget.scrollLeft / e.currentTarget.clientWidth))}
+          onPointerDown={() => setAuto(false)}
+        >
+          {posters.map((poster, i) => (
+            <div key={poster.src} className={`poster-slide${i === index ? ' on' : ''}`} role="group" aria-roledescription="slide" aria-label={`${i + 1} of ${n}`}>
+              <img src={poster.src} alt={poster.alt} width={720} height={960} decoding="async" draggable={false} />
+            </div>
+          ))}
+        </div>
+        {n > 1 && (
+          <>
+            <button type="button" className="poster-arrow prev" aria-controls={trackId} aria-label="Previous poster" onClick={() => choose(index - 1)}>
+              <ChevronLeft aria-hidden="true" strokeWidth={1.75} />
+            </button>
+            <button type="button" className="poster-arrow next" aria-controls={trackId} aria-label="Next poster" onClick={() => choose(index + 1)}>
+              <ChevronRight aria-hidden="true" strokeWidth={1.75} />
+            </button>
+          </>
+        )}
+      </div>
+      {n > 1 && (
+        <div className="poster-dots">
+          {posters.map((poster, i) => (
+            <button
+              key={poster.src}
+              type="button"
+              className={i === index ? 'on' : undefined}
+              aria-controls={trackId}
+              aria-label={`Show poster ${i + 1}`}
+              aria-current={i === index || undefined}
+              onClick={() => choose(i)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const PILLARS: Array<[LucideIcon, string]> = [
+  [Users, 'Thoughtful Sessions'],
+  [UserRound, 'Inspiring Speakers'],
+  [BookOpen, 'Meaningful Dialogues'],
+  [Network, 'Stronger Networks'],
+];
+
+const STEPS: Array<[LucideIcon, string, string]> = [
+  [FileText, 'Fill in the form', 'You receive a registration number at once.'],
+  [Check, 'Confirmation', 'GIO Keralam reviews and confirms your registration.'],
+  [QrCode, 'Entry pass', 'A pass with a QR code is sent on WhatsApp for the entrance.'],
+];
+
+const SOCIAL_ICONS: Record<string, ReactNode> = {
+  Facebook: <path d="M14.5 7.5h-1.6c-1.1 0-1.9.8-1.9 1.9V21M8.5 12.5h6" />,
+  Instagram: (
+    <>
+      <rect x="4" y="4" width="16" height="16" rx="5" />
+      <circle cx="12" cy="12" r="3.6" />
+      <circle cx="16.8" cy="7.2" r="0.6" fill="currentColor" />
+    </>
+  ),
+  YouTube: (
+    <>
+      <rect x="3" y="6" width="18" height="12" rx="3.5" />
+      <path d="M10.5 9.6v4.8l4-2.4z" fill="currentColor" />
+    </>
+  ),
+};
 
 export default function Landing() {
   const [params] = useSearchParams();
@@ -189,22 +318,22 @@ export default function Landing() {
   const pinned = site.announcements.find((a) => a.pinned && (a.status ?? 'published') !== 'draft');
   const words = themeWords(p.themeTitle);
   const themeLine = plain(p.themeTitle) || p.themeShort;
-
+  const showTheme = visible('theme') && Boolean(p.themeTitle);
   const showAbout = visible('about') && Boolean(p.aboutBody || p.aboutImage || pv);
-  const nav: Array<[string, string]> = [];
+  const showVenue = visible('venue') || visible('contact');
+
+  const nav: Array<[string, string]> = [['s-home', 'Home']];
+  if (showTheme) nav.push(['s-theme', 'Theme']);
   if (showAbout) nav.push(['s-about', 'About']);
-  if (visible('theme') && p.themeTitle) nav.push(['s-theme', 'Theme']);
   if (visible('programme')) nav.push(['s-programme', 'Programme']);
   if (visible('speakers') && site.speakers.length) nav.push(['s-speakers', 'Speakers']);
   nav.push(['s-reg', 'Registration']);
+  if (showVenue) nav.push(['s-contact', 'Venue']);
   if (visible('faq') && site.faqs.length) nav.push(['s-faq', 'FAQ']);
-  if (visible('venue') || visible('contact')) nav.push(['s-contact', 'Venue']);
 
-  const facts = [
-    ['Date', p.dateText],
-    ['Location', p.location],
-    ['Venue', p.venue],
-  ].filter(([, v]) => v);
+  const date = p.dateText ? splitDate(p.dateText) : null;
+  const place = p.location || p.venue;
+  const placeSub = p.location ? p.venue || 'Kerala, India' : '';
 
   const contacts = [
     ['Phone', p.phone, p.phone ? `tel:${p.phone.replace(/[^\d+]/g, '')}` : null],
@@ -214,6 +343,7 @@ export default function Landing() {
     ['Instagram', p.instagram && 'Instagram', safeHref(p.instagram)],
     ['YouTube', p.youtube && 'YouTube', safeHref(p.youtube)],
   ].filter((c): c is [string, string, string] => Boolean(c[1] && c[2]));
+  const socials = contacts.filter(([label]) => label in SOCIAL_ICONS);
   const map = safeHref(p.mapUrl);
 
   return (
@@ -238,12 +368,11 @@ export default function Landing() {
       )}
 
       <SiteHeader
-        logo={p.logo}
         nav={nav}
         actions={
           open && (
-            <Link to="/register" className="btn hdr-reg">
-              Register now
+            <Link to="/register" className="btn btn-reg hdr-reg">
+              Register now <span className="arr" aria-hidden="true">→</span>
             </Link>
           )
         }
@@ -251,9 +380,10 @@ export default function Landing() {
       />
 
       <main id="main">
-        <section className="hero" aria-labelledby="hero-title">
-          <Flourish />
-          <div className={`wrap hero-grid${p.poster ? '' : ' solo'}`}>
+        <section className="hero" id="s-home" aria-labelledby="hero-title">
+          <Art left="hero-left" lazy={false} />
+          <div className="wrap hero-grid">
+            <img className="art art-line" src="/brand/bg/women-line.webp" width={1200} height={1152} alt="" aria-hidden="true" decoding="async" />
             <div className="hero-copy enter">
               {p.presenter && <p className="eyebrow">{p.presenter}</p>}
               <h1 id="hero-title">
@@ -266,43 +396,59 @@ export default function Landing() {
                 </p>
               )}
               {p.intro && <p className="lede">{p.intro}</p>}
-              {facts.length > 0 && (
+              {(date || place) && (
                 <dl className="facts">
-                  {facts.map(([k, v]) => (
-                    <div key={k}>
-                      <dt>{k}</dt>
-                      <dd>{v}</dd>
+                  {date && (
+                    <div>
+                      <dt className="sr-only">Date</dt>
+                      <dd>
+                        <span className="fic" aria-hidden="true">
+                          <CalendarDays strokeWidth={1.6} />
+                        </span>
+                        <span>
+                          <b>{date.big}</b>
+                          {date.rest}
+                        </span>
+                      </dd>
                     </div>
-                  ))}
+                  )}
+                  {place && (
+                    <div>
+                      <dt className="sr-only">Location</dt>
+                      <dd>
+                        <span className="fic" aria-hidden="true">
+                          <svg viewBox="0 0 24 24">
+                            <path d="M12 22s-7.5-6.4-7.5-12.2a7.5 7.5 0 0115 0C19.5 15.6 12 22 12 22z" fill="currentColor" />
+                            <circle cx="12" cy="9.8" r="2.7" fill="#f6e4e1" />
+                          </svg>
+                        </span>
+                        <span>
+                          <b>{place}</b>
+                          {placeSub}
+                        </span>
+                      </dd>
+                    </div>
+                  )}
                 </dl>
               )}
               <div className="hero-cta" ref={heroCta}>
                 <RegisterButton open={open} large />
-                {visible('theme') && p.themeTitle && (
-                  <a className="tlink" href="#s-theme">
+                {showTheme && (
+                  <a className="explore" href="#s-theme">
+                    <span className="explore-ic" aria-hidden="true">
+                      <Play fill="currentColor" strokeWidth={1.5} />
+                    </span>
                     Explore the theme
                   </a>
                 )}
               </div>
             </div>
-            {p.poster && (
-              <figure className="poster">
-                <div className="poster-print">
-                  <img src={p.poster.url} alt={p.poster.alt} width={p.poster.width} height={p.poster.height} decoding="async" />
-                </div>
-                {(p.posterCaption || p.posterTag) && (
-                  <figcaption>
-                    <span>{p.posterCaption}</span>
-                    <span>{p.posterTag}</span>
-                  </figcaption>
-                )}
-              </figure>
-            )}
+            <PosterSlider posters={POSTERS} />
           </div>
         </section>
 
         {visible('updates') && site.announcements.length > 0 && (
-          <Section id="s-updates" label="Announcements" hidden={!p.show.updates} tag={hiddenTag('updates')} className="after-hero">
+          <Section id="s-updates" label="Announcements" hidden={!p.show.updates} tag={hiddenTag('updates')}>
             <h2>
               <Rich text={p.updatesHeading || 'Latest updates'} />
             </h2>
@@ -321,92 +467,125 @@ export default function Landing() {
           </Section>
         )}
 
-        {showAbout && (
-          <Section
-            id="s-about"
-            label="About"
-            hidden={!p.show.about || !p.aboutBody}
-            tag={hiddenTag('about') ?? (pv && !p.aboutBody ? 'Empty' : undefined)}
-            className="after-hero"
-          >
-            <h2>
-              <Rich text={p.aboutHeading || 'About the conference'} />
-            </h2>
-            {p.aboutBody && (
-              <div className="body">
-                <Paras text={p.aboutBody} />
-              </div>
-            )}
-            {p.aboutImage && (
-              <figure className="about-img">
-                <img src={p.aboutImage.url} alt={p.aboutImage.alt} width={p.aboutImage.width} height={p.aboutImage.height} loading="lazy" />
-                {p.aboutImage.caption && <figcaption>{p.aboutImage.caption}</figcaption>}
-              </figure>
-            )}
-          </Section>
+        {showTheme && (
+          <section className={`band band-theme rv-art${!p.show.theme ? ' is-draft' : ''}`} id="s-theme" aria-labelledby="s-theme-label">
+            <Art left="theme-left" right="theme-right" />
+            <div className="wrap band-in">
+              <p className="kicker" id="s-theme-label">
+                The theme
+                <DraftTag label={hiddenTag('theme')} />
+              </p>
+              {words ? (
+                <ol className="words rv-kids" aria-label={themeLine}>
+                  {words.map((w) => (
+                    <li key={w}>
+                      <LeafMark />
+                      <span className="w">{w}</span>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="quote rv">
+                  <Rich text={p.themeTitle} />
+                </p>
+              )}
+              {p.themeSubtitle && <p className="quote-sub rv">{p.themeSubtitle}</p>}
+              {p.themeBody && (
+                <div className="body rv">
+                  <Paras text={p.themeBody} />
+                </div>
+              )}
+            </div>
+          </section>
         )}
 
-        {visible('theme') && p.themeTitle && (
-          <Section id="s-theme" label="The theme" hidden={!p.show.theme} tag={hiddenTag('theme')} tone="wine">
-            {words ? (
-              <ol className="words" aria-label={themeLine}>
-                {words.map((w, i) => (
-                  <li key={w}>
-                    <span className="n" aria-hidden="true">
-                      {ROMAN[i]}
-                    </span>
-                    <span className="w">{w}</span>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p className="quote">
-                <Rich text={p.themeTitle} />
-              </p>
-            )}
-            {p.themeSubtitle && <p className="quote-sub">{p.themeSubtitle}</p>}
-            {p.themeBody && (
-              <div className="body">
-                <Paras text={p.themeBody} />
+        {showAbout && (
+          <section className={`band band-wine rv-art${!p.show.about || !p.aboutBody ? ' is-draft' : ''}`} id="s-about" aria-labelledby="s-about-title">
+            <Art left="about-left" right="about-right" />
+            <div className="wrap about-grid">
+              <div className="rv">
+                <p className="kicker kicker-2">
+                  <span>About</span>
+                  <span>the conference</span>
+                  <DraftTag label={hiddenTag('about') ?? (pv && !p.aboutBody ? 'Empty' : undefined)} />
+                </p>
+                <h2 id="s-about-title">
+                  <Rich text={p.aboutHeading || 'About the conference'} />
+                </h2>
               </div>
-            )}
-          </Section>
+              <div>
+                {p.aboutBody && (
+                  <div className="body about-body rv">
+                    <Paras text={p.aboutBody} />
+                  </div>
+                )}
+                {p.aboutImage && (
+                  <figure className="about-img rv">
+                    <img src={p.aboutImage.url} alt={p.aboutImage.alt} width={p.aboutImage.width} height={p.aboutImage.height} loading="lazy" />
+                    {p.aboutImage.caption && <figcaption>{p.aboutImage.caption}</figcaption>}
+                  </figure>
+                )}
+                <ul className="pillars rv-kids">
+                  {PILLARS.map(([Icon, label]) => (
+                    <li key={label}>
+                      <span className="ic" aria-hidden="true">
+                        <Icon strokeWidth={1.5} />
+                      </span>
+                      {label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </section>
         )}
 
         {visible('programme') && (
-          <Section id="s-programme" label="Programme" hidden={!p.show.programme} tag={hiddenTag('programme')}>
-            <h2>
-              <Rich text={p.programmeHeading || 'Programme'} />
-            </h2>
-            {p.programmeIntro && (
-              <div className="body">
-                <Paras text={p.programmeIntro} />
-              </div>
-            )}
+          <Section id="s-programme" label="Programme" hidden={!p.show.programme} tag={hiddenTag('programme')} art>
             {site.programme.length ? (
-              <ol className="prog">
-                {site.programme.map((item) => {
-                  const when = timeRange(item.start, item.end);
-                  const meta = [item.stage, ...item.speakers].filter(Boolean).join(' · ');
-                  return (
-                    <li key={item.id} className={[item.type === 'break' ? 'brk' : '', draftCls(item.status) ?? ''].join(' ').trim() || undefined}>
-                      {when ? <span className="t">{when}</span> : <span className="t tbc">Time to be confirmed</span>}
-                      <div>
-                        <h3>
-                          {item.title}
-                          <DraftTag status={item.status} />
-                        </h3>
-                        {meta && <p className="meta">{meta}</p>}
-                        {item.description && <p className="d">{item.description}</p>}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ol>
+              <>
+                <h2>
+                  <Rich text={p.programmeHeading || 'Programme'} />
+                </h2>
+                {p.programmeIntro && (
+                  <div className="body">
+                    <Paras text={p.programmeIntro} />
+                  </div>
+                )}
+                <ol className="prog">
+                  {site.programme.map((item) => {
+                    const when = timeRange(item.start, item.end);
+                    const meta = [item.stage, ...item.speakers].filter(Boolean).join(' · ');
+                    return (
+                      <li key={item.id} className={[item.type === 'break' ? 'brk' : '', draftCls(item.status) ?? ''].join(' ').trim() || undefined}>
+                        {when ? <span className="t">{when}</span> : <span className="t tbc">Time to be confirmed</span>}
+                        <div>
+                          <h3>
+                            {item.title}
+                            <DraftTag status={item.status} />
+                          </h3>
+                          {meta && <p className="meta">{meta}</p>}
+                          {item.description && <p className="d">{item.description}</p>}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </>
             ) : (
-              <div className="empty-note">
-                <Leaf />
-                <p>Programme will be announced soon.</p>
+              <div className="soon">
+                <span className="soon-ic" aria-hidden="true">
+                  <CalendarDays strokeWidth={1.5} />
+                </span>
+                <div>
+                  <p className="soon-t">Programme will be announced soon.</p>
+                  <p className="soon-s">{p.programmeIntro || 'Details about sessions, speakers and schedule will be updated here.'}</p>
+                </div>
+                {socials[0] && (
+                  <a className="btn gold" href={socials[0][2]} target="_blank" rel="noopener noreferrer">
+                    Stay updated <span className="arr" aria-hidden="true">→</span>
+                  </a>
+                )}
               </div>
             )}
           </Section>
@@ -467,32 +646,84 @@ export default function Landing() {
           </Section>
         )}
 
-        <Section id="s-reg" label="Registration" tone="cream">
-          <h2>
-            <Rich text={p.regHeading || 'Register once. Your entry pass comes on WhatsApp.'} />
-          </h2>
-          <ol className="steps">
-            <li>
-              <span className="n">i.</span>
-              <h3>Fill in the form</h3>
-              <p>You receive a registration number at once.</p>
-            </li>
-            <li>
-              <span className="n">ii.</span>
-              <h3>Confirmation</h3>
-              <p>GIO Keralam reviews and confirms your registration.</p>
-            </li>
-            <li>
-              <span className="n">iii.</span>
-              <h3>Entry pass</h3>
-              <p>A pass with a QR code is sent on WhatsApp for the entrance.</p>
-            </li>
-          </ol>
-          {p.regNote && <p className="body">{p.regNote}</p>}
-          <div className="hero-cta">
-            <RegisterButton open={open} large />
+        <section className="band band-wine band-reg rv-art" id="s-reg" aria-labelledby="s-reg-title">
+          <Art left="reg-left" right="close-right" />
+          <div className="wrap reg-in">
+            <p className="kicker">Registration</p>
+            <h2 id="s-reg-title" className="rv">
+              <Rich text={p.regHeading || 'Register once. Your entry pass comes on WhatsApp.'} />
+            </h2>
+            <ol className="rsteps rv-kids">
+              {STEPS.map(([Icon, title, text], i) => (
+                <li key={title}>
+                  <span className="num" aria-hidden="true">
+                    {String(i + 1).padStart(2, '0')}
+                  </span>
+                  <span className="ic" aria-hidden="true">
+                    <Icon strokeWidth={1.6} />
+                  </span>
+                  <h3>{title}</h3>
+                  <p>{text}</p>
+                </li>
+              ))}
+            </ol>
+            {p.regNote && <p className="reg-note rv">{p.regNote}</p>}
+            <div className="reg-cta rv">
+              <RegisterButton open={open} large />
+              {open && (
+                <p className="reg-sub">
+                  Quick and easy registration <span aria-hidden="true">·</span> Get your entry pass on WhatsApp
+                </p>
+              )}
+            </div>
           </div>
-        </Section>
+        </section>
+
+        {showVenue && (
+          <Section id="s-contact" label={visible('contact') ? 'Venue & contact' : 'Venue'} hidden={!p.show.venue && !p.show.contact} art>
+            {visible('venue') && (
+              <div className={`vrow${!p.show.venue ? ' is-draft' : ''}`}>
+                <span className="vic" aria-hidden="true">
+                  <MapPin strokeWidth={1.6} />
+                </span>
+                <div>
+                  <h3>
+                    {p.venue || p.location || 'Venue'}
+                    <DraftTag label={hiddenTag('venue')} />
+                  </h3>
+                  <p className="addr">{p.venueAddress || `${p.venue && p.location ? `${p.location}. ` : ''}Full venue details will be announced.`}</p>
+                </div>
+                {map && (
+                  <a className="btn line" href={map} target="_blank" rel="noopener noreferrer">
+                    View on map <span className="arr" aria-hidden="true">→</span>
+                  </a>
+                )}
+              </div>
+            )}
+            {visible('contact') && (
+              <div className={`vc-card${!p.show.contact ? ' is-draft' : ''}`}>
+                <h3>
+                  Contact
+                  <DraftTag label={hiddenTag('contact')} />
+                </h3>
+                {contacts.length ? (
+                  <ul className="clist">
+                    {contacts.map(([label, text, href]) => (
+                      <li key={label}>
+                        <span>{label}</span>
+                        <a href={href} {...(/^https?:/.test(href) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
+                          {text}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="addr">Contact details will be published soon.</p>
+                )}
+              </div>
+            )}
+          </Section>
+        )}
 
         {visible('faq') && site.faqs.length > 0 && (
           <Section id="s-faq" label="FAQ" hidden={!p.show.faq} tag={hiddenTag('faq')}>
@@ -515,111 +746,64 @@ export default function Landing() {
           </Section>
         )}
 
-        {(visible('venue') || visible('contact')) && (
-          <Section id="s-contact" label="Venue & contact" hidden={!p.show.venue && !p.show.contact}>
-            <div className="vc">
-              {visible('venue') && (
-                <div className={`vc-card${!p.show.venue ? ' is-draft' : ''}`}>
-                  <span className="ic" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 21s-7-6.2-7-11.5a7 7 0 0114 0C19 14.8 12 21 12 21z" />
-                      <circle cx="12" cy="9.5" r="2.5" />
-                    </svg>
-                  </span>
-                  <h3>
-                    {p.venue || p.location || 'Venue'}
-                    <DraftTag label={hiddenTag('venue')} />
-                  </h3>
-                  <p className="addr">{p.venueAddress || `${p.venue && p.location ? `${p.location}. ` : ''}Full venue details will be announced.`}</p>
-                  {p.dateText && (
-                    <p className="when">
-                      <span>Date</span>
-                      <b>{p.dateText}</b>
-                    </p>
-                  )}
-                  {map && (
-                    <a className="maplink" href={map} target="_blank" rel="noopener noreferrer">
-                      Open in Maps
-                    </a>
-                  )}
-                </div>
-              )}
-              {visible('contact') && (
-                <div className={`vc-card${!p.show.contact ? ' is-draft' : ''}`}>
-                  <span className="ic" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M4 6.5h16v11H4z" />
-                      <path d="M4.5 7l7.5 6 7.5-6" />
-                    </svg>
-                  </span>
-                  <h3>
-                    Contact
-                    <DraftTag label={hiddenTag('contact')} />
-                  </h3>
-                  {contacts.length ? (
-                    <ul className="clist">
-                      {contacts.map(([label, text, href]) => (
-                        <li key={label}>
-                          <span>{label}</span>
-                          <a href={href} {...(/^https?:/.test(href) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
-                            {text}
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="addr">Contact details will be published soon.</p>
-                  )}
-                </div>
-              )}
-            </div>
-          </Section>
-        )}
-
         {p.closingText && (
-          <section className="close" aria-labelledby="close-title">
-            <Flourish />
-            <div className="wrap rv">
-              <p className="eyebrow">{plain(p.title)}</p>
+          <section className="close rv-art" aria-labelledby="close-title">
+            <Art right="close-right" />
+            <img className="art art-group" src="/brand/bg/women-group.webp" width={900} height={804} alt="" aria-hidden="true" loading="lazy" decoding="async" />
+            <div className="wrap rv-kids">
+              <p className="kicker">{plain(p.title)}</p>
               <h2 id="close-title">
-                <Rich text={p.closingText} />
+                {/* "15 November 2026, *Ernakulam*": the emphasis goes on its own line, so the comma goes. */}
+                <Rich text={p.closingText.replace(/,\s*\*/, ' *')} />
               </h2>
-              <RegisterButton open={open} large />
+              <div>
+                <RegisterButton open={open} large />
+              </div>
             </div>
           </section>
         )}
       </main>
 
       <footer className="ftr">
-        <div className="wrap ftr-in">
-          {p.logo && <img src={p.logo.url} alt={p.logo.alt} width={p.logo.width} height={p.logo.height} loading="lazy" />}
-          <p>{p.footerText}</p>
-          {nav.length > 0 && (
-            <nav aria-label="Footer">
-              {nav.map(([id, label]) => (
-                <a key={id} href={`#${id}`}>
-                  {label}
-                </a>
+        <div className="wrap ftr-in rv-kids">
+          <img src="/brand/bbb-logo-w.webp" width={204} height={220} alt="Being, Becoming, Belonging" loading="lazy" className="f-bbb" />
+          <img src="/brand/icw-logo.webp" width={560} height={242} alt="International Conference on Women" loading="lazy" className="f-icw" />
+          <img src="/brand/gio-logo-white.webp" width={299} height={220} alt="GIO Keralam" loading="lazy" className="f-gio" />
+          {socials.length > 0 && (
+            <ul className="social">
+              {socials.map(([label, , href]) => (
+                <li key={label}>
+                  <a href={href} target="_blank" rel="noopener noreferrer" aria-label={label}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      {SOCIAL_ICONS[label]}
+                    </svg>
+                  </a>
+                </li>
               ))}
-              {open && <Link to="/register">Register</Link>}
-            </nav>
+            </ul>
           )}
         </div>
         <div className="wrap">
           <div className="ftr-base">
-            <span>{[p.dateText, p.location].filter(Boolean).join(' · ')}</span>
-            <a href="#main">Back to top ↑</a>
+            <span>{p.footerText}</span>
+            <span>
+              Powered by:{' '}
+              <a href="https://d4dx.co/" target="_blank" rel="noopener noreferrer" className="credit">
+                D4DX Innovations LLP
+              </a>
+            </span>
           </div>
         </div>
       </footer>
 
       {open && (
         <div className={`sticky-cta${passedHero ? ' show' : ''}`} aria-hidden={!passedHero || undefined}>
-          <Link to="/register" className="btn" tabIndex={passedHero ? undefined : -1}>
+          <Link to="/register" className="btn btn-reg" tabIndex={passedHero ? undefined : -1}>
             Register now <span className="arr" aria-hidden="true">→</span>
           </Link>
         </div>
       )}
+      <BackToTop raised={open} />
     </div>
   );
 }
