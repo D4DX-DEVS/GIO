@@ -113,7 +113,7 @@ export function PassImage({ id, passId, name, refreshKey = 0 }: { id: string; pa
   const [attempt, setAttempt] = useState(0);
   const src = `${passImageUrl(id, passId)}&r=${refreshKey}-${attempt}`;
   return (
-    <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-100" style={{ aspectRatio: '1080 / 1660' }}>
+    <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-100" style={{ aspectRatio: '1080 / 1440' }}>
       {state === 'loading' && (
         <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-500">
           <Loader2 className="mr-2 h-5 w-5 animate-spin text-brand-600" aria-hidden /> Loading pass…

@@ -194,8 +194,7 @@ describe('submission', () => {
     assert.equal(stored.acl, 'public-read');
     assert.deepEqual(stored.body.subarray(0, 8), PNG_SIGNATURE);
     assert.ok(stored.body.length > 10000);
-    // Base size + Place row + the photo block.
-    assert.deepEqual(pngSize(stored.body), { width: 1080, height: 1660 + 100 + 365 });
+    assert.deepEqual(pngSize(stored.body), { width: 1080, height: 1440 });
   });
 
   test('downloadUrl serves the stored PNG as an attachment', async () => {

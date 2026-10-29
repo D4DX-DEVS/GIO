@@ -136,7 +136,7 @@ describe('old pass', () => {
     assert.equal(view.headers.location, `https://cdn.test.example/TEST/passes/${pass.imageKey}`);
     const stored = spaces.objects.get(`TEST/passes/${pass.imageKey}`);
     assert.deepEqual(stored.body.subarray(0, 8), PNG_SIGNATURE);
-    assert.deepEqual(pngSize(stored.body), { width: 1080, height: 1660 });
+    assert.deepEqual(pngSize(stored.body), { width: 1080, height: 1440 });
 
     // A second view and a download reuse that file.
     const again = await admin.get(`/api/admin/registrations/${confirmedId}/pass.png`);
@@ -152,7 +152,7 @@ describe('old pass', () => {
     const q = imageLinkQuery(oldPassId, 1);
     const res = await request(app).get(`/api/passes/${oldPassId}/image?v=${q.v}&exp=${q.exp}&sig=${q.sig}&download=1`);
     assert.equal(res.status, 200);
-    assert.deepEqual(pngSize(res.body), { width: 1080, height: 1660 });
+    assert.deepEqual(pngSize(res.body), { width: 1080, height: 1440 });
   });
 
   test('passes the gate check, with no children or photo on it', async () => {
@@ -187,7 +187,7 @@ describe('generating the pass of an old submitted record', () => {
     assert.equal(String(pass.issuedBy), String((await Admin.findOne({ username: 'chief' }))._id), 'issued by the admin who generated it');
     const stored = spaces.objects.get(`TEST/passes/${pass.imageKey}`);
     assert.ok(stored, 'image stored in Spaces');
-    assert.deepEqual(pngSize(stored.body), { width: 1080, height: 1660 });
+    assert.deepEqual(pngSize(stored.body), { width: 1080, height: 1440 });
 
     // The update added only workflow fields; the registrant's data is untouched.
     const raw = await Registration.collection.findOne({ _id: submittedId });

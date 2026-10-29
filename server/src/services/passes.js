@@ -37,9 +37,8 @@ async function markGenerated(registration, pass) {
  */
 async function storeImage(pass) {
   if (pass.imageKey) return pass;
-  const event = pass.eventSnapshot?.name ? pass.eventSnapshot : await getEvent();
   const photo = pass.holder?.photo ? await store.photos.get(pass.holder.photo) : null;
-  const png = await renderPass(pass, event, photo);
+  const png = await renderPass(pass, photo);
   const key = store.passes.newKey(pass.passId, pass.version);
   await store.passes.put(key, png);
   // Another request may have stored an image in the meantime; keep the first.
