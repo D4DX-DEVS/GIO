@@ -18,12 +18,8 @@ let app;
 let admin;
 const H = { 'X-Requested-With': 'rms' };
 
-// Pass image heights (src/services/passRenderer.js): the original size, plus
-// a row for Place, a band for accompanying children and the photo block.
-const PASS_BASE_H = 1660;
-const PLACE_ROW_H = 100;
-const CHILDREN_BAND_H = 110;
-const PHOTO_BLOCK_H = 365;
+// Pass image size (src/services/passRenderer.js): the delegate frame's, for every pass.
+const PASS_SIZE = { width: 1080, height: 1440 };
 const PHOTO_KEY = /^[a-f0-9]{32}\.jpg$/;
 const cdnPhoto = (key) => `https://cdn.test.example/TEST/photos/${key}`;
 
@@ -102,8 +98,7 @@ describe('form version', () => {
     const pass = await EntryPass.findOne({ registration: reg._id });
     assert.equal(pass.holder.photo, undefined);
     assert.equal('photo' in (await EntryPass.findById(pass._id).lean()).holder, false);
-    // Same size as before photos existed: no place row, no children band, no photo block.
-    assert.deepEqual(pngSize(spaces.objects.get(`TEST/passes/${pass.imageKey}`).body), { width: 1080, height: PASS_BASE_H });
+    assert.deepEqual(pngSize(spaces.objects.get(`TEST/passes/${pass.imageKey}`).body), PASS_SIZE);
     const detail = (await admin.get(`/api/admin/registrations/${reg._id}`)).body.registration;
     assert.equal(detail.photoUrl, null);
     assert.equal((await admin.get('/api/admin/registrations').query({ search: 'Legacy NoPhoto' })).body.items[0].photoUrl, null);
@@ -428,20 +423,19 @@ describe('entry pass and admin views of the new fields', () => {
     assert.equal((await Registration.findById(reg._id)).photo, TEST_PHOTO);
   });
 
-  test('the stored pass image is taller for the photo, the place row and the children band', async () => {
+  test('the stored pass image is the size of the delegate frame', async () => {
     const pass = await EntryPass.findOne({ registration: reg._id });
     const stored = spaces.objects.get(`TEST/passes/${pass.imageKey}`).body;
-    const height = PASS_BASE_H + PHOTO_BLOCK_H + PLACE_ROW_H + CHILDREN_BAND_H;
-    assert.deepEqual(pngSize(stored), { width: 1080, height });
+    assert.deepEqual(pngSize(stored), PASS_SIZE);
     const img = await admin.get(`/api/admin/registrations/${reg._id}/pass.png?download=1`).buffer(true);
     assert.equal(img.status, 200);
-    assert.deepEqual(pngSize(img.body), { width: 1080, height });
+    assert.deepEqual(pngSize(img.body), PASS_SIZE);
   });
 
-  test('a registration with 0 children gets the photo and the place row, and no children band', async () => {
+  test('a registration with 0 children gets its pass', async () => {
     const r = await submitOk(sampleV3({ name: 'Solo Person', gender: 'Female', mobile: '9830000003', childrenCount: 0 }));
     const pass = await EntryPass.findOne({ registration: r._id });
-    assert.deepEqual(pngSize(spaces.objects.get(`TEST/passes/${pass.imageKey}`).body), { width: 1080, height: PASS_BASE_H + PHOTO_BLOCK_H + PLACE_ROW_H });
+    assert.deepEqual(pngSize(spaces.objects.get(`TEST/passes/${pass.imageKey}`).body), PASS_SIZE);
     assert.equal(r.whatsapp, r.mobile, 'same as phone number');
   });
 
@@ -733,15 +727,14 @@ describe('photo on the registration', () => {
     const png = spaces.objects.get(`TEST/passes/${pass.imageKey}`);
     assert.ok(png, 'the pass image is in Spaces');
     assert.equal(res.body.pass.imageUrl, `https://cdn.test.example/TEST/passes/${pass.imageKey}`);
-    // Same pass without a photo is PASS_BASE_H + PLACE_ROW_H high; the photo adds its block.
-    assert.deepEqual(pngSize(png.body), { width: 1080, height: PASS_BASE_H + PLACE_ROW_H + PHOTO_BLOCK_H });
+    assert.deepEqual(pngSize(png.body), PASS_SIZE);
 
-    // The photo itself is drawn on the pass: the middle of the photo frame is its colour.
+    // The photo itself is drawn on the pass: the frame's window above the DELEGATE band is its colour.
     const img = await loadImage(png.body);
     const canvas = createCanvas(img.width, img.height);
     const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0);
-    const [r, g, b] = ctx.getImageData(540, 614, 1, 1).data;
+    const [r, g, b] = ctx.getImageData(463, 700, 1, 1).data;
     for (const [got, want] of [[r, 0x1a], [g, 0x8a], [b, 0x3c]]) assert.ok(Math.abs(got - want) <= 12, `pixel ${[r, g, b]}`);
 
     // The photo stays in Spaces and shows in the admin views.
@@ -761,7 +754,7 @@ describe('photo on the registration', () => {
     const reg = await Registration.findOne({ regNo: res.body.regNo });
     assert.equal(reg.photo, key);
     const pass = await EntryPass.findOne({ registration: reg._id });
-    assert.deepEqual(pngSize(spaces.objects.get(`TEST/passes/${pass.imageKey}`).body), { width: 1080, height: PASS_BASE_H + PLACE_ROW_H });
+    assert.deepEqual(pngSize(spaces.objects.get(`TEST/passes/${pass.imageKey}`).body), PASS_SIZE);
   });
 
   test('the same Idempotency-Key returns the original registration and does not save the photo again', async () => {

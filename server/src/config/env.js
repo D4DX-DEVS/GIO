@@ -47,8 +47,8 @@ const env = {
   },
 
   // EVENT_NAME / EVENT_DATE / EVENT_VENUE above are used until the conference
-  // website settings are published in the admin console (services/site.js) and
-  // are printed on the entry pass.
+  // website settings are published in the admin console (services/site.js),
+  // for the registration page and the record kept with each entry pass.
 
   // Hard switch. When false, registration is closed whatever the admin
   // console says; when true, the admin console's switch decides.
