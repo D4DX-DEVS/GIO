@@ -9,6 +9,8 @@ const mongoose = require('mongoose');
 const { start, stop, login, spaces, pngSize, legacyRegistration, LEGACY_DATE: now, request } = require('./helpers');
 const { Admin, Registration, EntryPass } = require('../src/models');
 const { qrPayload, imageLinkQuery } = require('../src/utils/passTokens');
+const { TEMPLATE } = require('../src/services/passRenderer');
+const store = require('../src/providers/assetStore');
 
 let app;
 let admin;
@@ -163,6 +165,31 @@ describe('old pass', () => {
     assert.equal(v.body.pass.holder.childrenCount, undefined);
     assert.equal(v.body.pass.holder.photo, undefined);
     assert.equal((await admin.post('/api/admin/passes/verify').set(H).send({ code: oldPassId })).body.valid, true);
+  });
+
+  test('an image drawn on an older design is drawn again on the current one, keeping the pass ID and QR code', async () => {
+    // As stored before the delegate frame: an image, but no imageTemplate.
+    const oldKey = `${oldPassId}-v1-${'0'.repeat(32)}.png`;
+    await store.passes.put(oldKey, Buffer.from('old design'));
+    await EntryPass.collection.updateOne({ passId: oldPassId }, { $set: { imageKey: oldKey }, $unset: { imageTemplate: '' } });
+
+    const view = await admin.get(`/api/admin/registrations/${confirmedId}/pass.png`);
+    assert.equal(view.status, 302);
+    const pass = await EntryPass.findOne({ registration: confirmedId });
+    assert.notEqual(pass.imageKey, oldKey);
+    assert.match(pass.imageKey, /^K7QM-X2PA-9TZD-v1-[a-f0-9]{32}\.png$/);
+    assert.equal(pass.imageTemplate, TEMPLATE);
+    assert.equal(pass.version, 1);
+    assert.equal(view.headers.location, `https://cdn.test.example/TEST/passes/${pass.imageKey}`);
+    const stored = spaces.objects.get(`TEST/passes/${pass.imageKey}`);
+    assert.deepEqual(pngSize(stored.body), { width: 1080, height: 1440 });
+
+    // The download is the new image, and it is drawn only once.
+    const dl = await admin.get(`/api/admin/registrations/${confirmedId}/pass.png?download=1`);
+    assert.ok(dl.body.equals(stored.body));
+    const again = await admin.get(`/api/admin/registrations/${confirmedId}/pass.png`);
+    assert.equal(again.headers.location, view.headers.location);
+    assert.equal((await admin.post('/api/admin/passes/verify').set(H).send({ code: qrPayload(oldPassId, 1) })).body.valid, true);
   });
 });
 
