@@ -5,7 +5,7 @@ const { STATUS, PASS_STATUS } = require('../config/constants');
 const { HttpError } = require('../utils/httpError');
 const { generatePassId, parseQrPayload, imageLinkQuery } = require('../utils/passTokens');
 const store = require('../providers/assetStore');
-const { renderPass } = require('./passRenderer');
+const { renderPass, TEMPLATE } = require('./passRenderer');
 const { getEvent } = require('./site');
 
 // Details printed on the pass, frozen at issue. Place, the number of
@@ -31,19 +31,25 @@ async function markGenerated(registration, pass) {
 }
 
 /**
- * Renders the pass image and stores it in Spaces, once. A pass whose image
- * could not be stored (Spaces unreachable) keeps an empty imageKey and gets
- * its image on the next call.
+ * Renders the pass image and stores it in Spaces, once per design. A pass
+ * whose image could not be stored (Spaces unreachable) keeps an empty
+ * imageKey and gets its image on the next call; one whose image was drawn on
+ * an older design gets a new image the same way, with the same pass ID and
+ * QR code, so copies already shared still scan at the gate.
  */
 async function storeImage(pass) {
-  if (pass.imageKey) return pass;
+  if (pass.imageKey && pass.imageTemplate === TEMPLATE) return pass;
   const photo = pass.holder?.photo ? await store.photos.get(pass.holder.photo) : null;
   const png = await renderPass(pass, photo);
   const key = store.passes.newKey(pass.passId, pass.version);
   await store.passes.put(key, png);
   // Another request may have stored an image in the meantime; keep the first.
-  // null also matches passes saved before the field existed.
-  const saved = await EntryPass.findOneAndUpdate({ _id: pass._id, imageKey: { $in: ['', null] } }, { $set: { imageKey: key } }, { new: true });
+  // $ne also matches passes saved before the field existed.
+  const saved = await EntryPass.findOneAndUpdate(
+    { _id: pass._id, imageTemplate: { $ne: TEMPLATE } },
+    { $set: { imageKey: key, imageTemplate: TEMPLATE } },
+    { new: true }
+  );
   return saved ?? EntryPass.findById(pass._id);
 }
 
@@ -97,7 +103,7 @@ function downloadUrl(pass) {
   return `/api/passes/${encodeURIComponent(pass.passId)}/image?v=${q.v}&exp=${q.exp}&sig=${q.sig}&download=1`;
 }
 
-/** The stored PNG, storing it first for passes issued before images were kept in Spaces. */
+/** The stored PNG, storing it first for passes issued before images were kept in Spaces or drawn on an older design. */
 async function imageFile(pass) {
   const stored = await storeImage(pass);
   const png = await store.passes.get(stored.imageKey);

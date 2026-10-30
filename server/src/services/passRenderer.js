@@ -17,6 +17,9 @@ registerFont(path.join(FONT_DIR, 'NotoSansMalayalam-Regular.ttf'), { family: 'No
 registerFont(path.join(FONT_DIR, 'NotoSansMalayalam-Bold.ttf'), { family: 'Noto Sans Malayalam', weight: 'bold' });
 
 const FRAME_PATH = path.join(__dirname, '../../assets/pass-frame.png');
+// Bump when the design changes: stored images drawn on an older design are
+// drawn again on the current one when next viewed (services/passes.js).
+const TEMPLATE = 2;
 const W = 1080;
 const H = 1440;
 const FONT = '"Segoe UI", "Helvetica Neue", Arial, "Noto Sans", "Noto Sans Malayalam", sans-serif';
@@ -142,4 +145,4 @@ async function renderPass(pass, photo = null) {
   return canvas.toBuffer('image/png');
 }
 
-module.exports = { renderPass };
+module.exports = { renderPass, TEMPLATE };
