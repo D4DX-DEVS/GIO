@@ -123,7 +123,7 @@ All configuration lives on the server. The client contains no secrets.
 | `SUPPORT_CONTACT` | | Optional help line shown on the form |
 | `REGISTRATION_OPEN` | | `false` closes the public form whatever the admin switch says |
 | `DEFAULT_COUNTRY_CODE` | | Default `91` (India). Calling code of the country preselected for the phone and WhatsApp numbers. |
-| `DISTRICTS` | | Optional comma-separated district list. Defaults to the 14 districts of Kerala. |
+| `DISTRICTS` | | Optional comma-separated district list. Defaults to the 14 districts of Kerala, with Malappuram split into Malappuram West and Malappuram East. |
 | `TRUST_PROXY` | | `1` behind one reverse proxy, so rate limits see real client IPs |
 | `SESSION_HOURS` | | Admin session length (default 12) |
 | `PASS_IMAGE_LINK_MINUTES` | | Lifetime of the pass download link on the success page (default 60) |
