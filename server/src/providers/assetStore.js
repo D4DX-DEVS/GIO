@@ -127,6 +127,7 @@ const passes = {
   newKey: (passId, version) => `${passId}-v${version}-${crypto.randomBytes(16).toString('hex')}.png`,
   put: (key, buffer) => (checkPassKey(key), put('passes', key, buffer, 'image/png')),
   get: (key) => (checkPassKey(key), get('passes', key)),
+  remove: (key) => (checkPassKey(key), remove('passes', key)),
   url: (key) => (checkPassKey(key), cdnUrl('passes', key)),
 };
 

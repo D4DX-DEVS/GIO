@@ -23,6 +23,7 @@ import {
   SearchX,
   SlidersHorizontal,
   Ticket,
+  Trash2,
   TriangleAlert,
   Users,
   X,
@@ -31,7 +32,7 @@ import { api, errorMessage } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import type { FilterOptions, ListResponse, RegistrationDetail, RegistrationItem, Stats } from '../../lib/types';
 import { formatDate } from '../../lib/format';
-import { Alert, Avatar, Button, Dialog, EmptyState, PassBadge, Skeleton, cx } from '../../components/ui';
+import { Alert, Avatar, Button, Dialog, EmptyState, PassBadge, Skeleton, cx, useToast } from '../../components/ui';
 import { DownloadPassLink, PassViewer, useGeneratePass } from '../../components/RegistrationActions';
 import { useLayout } from './AdminLayout';
 
@@ -256,6 +257,36 @@ function RowActions({
   );
 }
 
+function SelectBox({
+  checked,
+  indeterminate,
+  onChange,
+  label,
+  showLabel,
+}: {
+  checked: boolean;
+  indeterminate?: boolean;
+  onChange: () => void;
+  label: string;
+  showLabel?: boolean;
+}) {
+  return (
+    <label className={cx('-m-2 flex shrink-0 cursor-pointer items-center gap-3 p-2', showLabel && 'text-[13px] font-semibold text-slate-600')}>
+      <input
+        type="checkbox"
+        className="h-[18px] w-[18px] cursor-pointer accent-brand-600"
+        checked={checked}
+        ref={(el) => {
+          if (el) el.indeterminate = Boolean(indeterminate);
+        }}
+        onChange={onChange}
+        aria-label={showLabel ? undefined : label}
+      />
+      {showLabel && label}
+    </label>
+  );
+}
+
 function SortHeader({
   label,
   sortKey,
@@ -304,7 +335,9 @@ function pageList(page: number, pages: number): Array<number | '…'> {
 export default function Dashboard() {
   const { admin } = useAuth();
   const { stats, refreshStats } = useLayout();
+  const toast = useToast();
   const canSend = Boolean(admin?.permissions.includes('send'));
+  const canDelete = Boolean(admin?.permissions.includes('delete'));
 
   const [params, setParams] = useSearchParams();
   const location = useLocation();
@@ -325,6 +358,11 @@ export default function Dashboard() {
   const [reloadKey, setReloadKey] = useState(0);
   const [viewing, setViewing] = useState<RegistrationItem | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
+  // Kept across pages and filters, so registrations can be picked from several
+  // pages and deleted together. The delete dialog lists every one.
+  const [selected, setSelected] = useState<Map<string, RegistrationItem>>(() => new Map());
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const { ask, dialog } = useGeneratePass((res: RegistrationDetail) => {
     const { statusHistory, updatedAt, children, ...item } = res.registration;
@@ -424,6 +462,53 @@ export default function Dashboard() {
     refreshStats();
   }
 
+  // After deleting every row of the last page, show the page that is now last.
+  useEffect(() => {
+    if (data && data.items.length === 0 && data.total > 0 && data.page > data.pages) setParam({ page: String(data.pages) }, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  const pageItems = data?.items ?? [];
+  const allOnPage = pageItems.length > 0 && pageItems.every((r) => selected.has(r.id));
+  const someOnPage = pageItems.some((r) => selected.has(r.id));
+
+  function toggleSelected(r: RegistrationItem) {
+    setSelected((prev) => {
+      const next = new Map(prev);
+      if (next.has(r.id)) next.delete(r.id);
+      else next.set(r.id, r);
+      return next;
+    });
+  }
+
+  function togglePage() {
+    setSelected((prev) => {
+      const next = new Map(prev);
+      for (const r of pageItems) {
+        if (allOnPage) next.delete(r.id);
+        else next.set(r.id, r);
+      }
+      return next;
+    });
+  }
+
+  async function deleteSelected() {
+    if (deleting || !selected.size) return;
+    setDeleting(true);
+    try {
+      const res = await api<{ deleted: number }>('/api/admin/registrations/delete', { method: 'POST', body: { ids: [...selected.keys()] } });
+      toast('success', `${res.deleted} registration${res.deleted === 1 ? '' : 's'} deleted.`);
+      setSelected(new Map());
+    } catch (err) {
+      // The selection is kept so the admin can try again.
+      toast('error', errorMessage(err));
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(false);
+      reload();
+    }
+  }
+
   function onSort(k: SortKey) {
     if (sort === k) setParam({ dir: dir === 'asc' ? 'desc' : 'asc' });
     // Names and districts read naturally A-Z; dates and ages newest/oldest first.
@@ -504,7 +589,7 @@ export default function Dashboard() {
   ];
 
   return (
-    <main className="mx-auto w-full max-w-[90rem] px-4 pb-16 pt-5 sm:px-6 lg:px-8 lg:pt-7">
+    <main className={cx('mx-auto w-full max-w-[90rem] px-4 pt-5 sm:px-6 lg:px-8 lg:pt-7', selected.size ? 'pb-32' : 'pb-16')}>
       {/* Greeting */}
       <section className="flex animate-fade-up flex-col gap-5 border-b border-slate-200 pb-6 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0">
@@ -720,6 +805,11 @@ export default function Dashboard() {
           {!error && data && data.items.length > 0 && (
             <div className={cx('transition-opacity duration-200', loading && 'pointer-events-none opacity-60')}>
               {/* Cards on phones and tablets */}
+              {canDelete && (
+                <div className="flex bg-slate-50/60 px-5 pt-4 sm:px-6 lg:hidden">
+                  <SelectBox checked={allOnPage} indeterminate={someOnPage && !allOnPage} onChange={togglePage} label="Select all on this page" showLabel />
+                </div>
+              )}
               <ul className="grid grid-cols-1 gap-3 bg-slate-50/60 p-3 sm:grid-cols-2 sm:gap-4 sm:p-4 lg:hidden">
                 {data.items.map((r, i) => (
                   <li
@@ -727,7 +817,8 @@ export default function Dashboard() {
                     className={cx(
                       'min-w-0 animate-fade-up rounded-2xl border border-slate-200/80 bg-white p-4 shadow-panel',
                       r.id === flashId && 'animate-flash',
-                      !r.hasPass && 'border-l-4 border-l-amber-400'
+                      !r.hasPass && 'border-l-4 border-l-amber-400',
+                      selected.has(r.id) && 'ring-2 ring-brand-300'
                     )}
                     style={{ animationDelay: `${Math.min(i, 8) * 25}ms` }}
                   >
@@ -742,6 +833,7 @@ export default function Dashboard() {
                           {r.childrenCount ? ` · ${childrenLabel(r.childrenCount)}` : ''}
                         </p>
                       </div>
+                      {canDelete && <SelectBox checked={selected.has(r.id)} onChange={() => toggleSelected(r)} label={`Select ${r.name}`} />}
                     </div>
                     <dl className="mt-3 space-y-1.5 rounded-xl bg-slate-50 p-3 text-[13px] text-slate-600">
                       <div className="flex min-w-0 items-center gap-2">
@@ -782,7 +874,12 @@ export default function Dashboard() {
                 <table className="w-full table-auto text-left text-sm">
                   <thead className="border-b border-slate-200/70 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                     <tr>
-                      <SortHeader label="Registrant" sortKey="name" sort={sort} dir={dir} onSort={onSort} className="pl-6" />
+                      {canDelete && (
+                        <th scope="col" className="w-0 py-3 pl-6 pr-1">
+                          <SelectBox checked={allOnPage} indeterminate={someOnPage && !allOnPage} onChange={togglePage} label="Select all on this page" />
+                        </th>
+                      )}
+                      <SortHeader label="Registrant" sortKey="name" sort={sort} dir={dir} onSort={onSort} className={canDelete ? undefined : 'pl-6'} />
                       <th scope="col" className="hidden px-3 py-3 2xl:table-cell">
                         Contact
                       </th>
@@ -799,8 +896,16 @@ export default function Dashboard() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {data.items.map((r) => (
-                      <tr key={r.id} className={cx('group transition-colors hover:bg-brand-50/40', r.id === flashId && 'animate-flash')}>
-                        <td className="py-3.5 pl-6 pr-3">
+                      <tr
+                        key={r.id}
+                        className={cx('group transition-colors hover:bg-brand-50/40', r.id === flashId && 'animate-flash', selected.has(r.id) && 'bg-brand-50/60')}
+                      >
+                        {canDelete && (
+                          <td className="py-3.5 pl-6 pr-1">
+                            <SelectBox checked={selected.has(r.id)} onChange={() => toggleSelected(r)} label={`Select ${r.name}`} />
+                          </td>
+                        )}
+                        <td className={cx('py-3.5 pr-3', canDelete ? 'pl-3' : 'pl-6')}>
                           <div className="flex items-center gap-3">
                             <span className="relative">
                               <Avatar name={r.name} src={r.photoUrl} className="h-10 w-10 text-xs" />
@@ -935,6 +1040,58 @@ export default function Dashboard() {
             {dateFields}
           </div>
         </div>
+      </Dialog>
+
+      {/* Selection bar, pinned to the bottom of the screen */}
+      {canDelete && selected.size > 0 && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:left-[17rem]">
+          <div
+            role="region"
+            aria-label="Selected registrations"
+            className="pointer-events-auto flex w-full max-w-xl animate-fade-up items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2 pl-4 shadow-lift"
+          >
+            <p className="min-w-0 flex-1 truncate text-sm text-slate-600">
+              <strong className="font-semibold tabular-nums text-slate-900">{selected.size}</strong> selected
+            </p>
+            <Button variant="ghost" size="sm" onClick={() => setSelected(new Map())}>
+              Clear
+            </Button>
+            <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>
+              <Trash2 className="h-4 w-4" aria-hidden /> Delete
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <Dialog
+        open={confirmDelete}
+        title={`Delete ${selected.size} registration${selected.size === 1 ? '' : 's'}?`}
+        icon={
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-600 ring-1 ring-inset ring-red-100">
+            <Trash2 className="h-5 w-5" aria-hidden />
+          </span>
+        }
+        onClose={() => !deleting && setConfirmDelete(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmDelete(false)} disabled={deleting} data-autofocus>
+              Cancel
+            </Button>
+            <Button variant="danger" loading={deleting} onClick={deleteSelected}>
+              {deleting ? 'Deleting…' : `Delete ${selected.size}`}
+            </Button>
+          </>
+        }
+      >
+        <p>Their entry passes stop working, and their photos and pass images are removed from storage. This cannot be undone.</p>
+        <ul className="mt-3 max-h-56 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50">
+          {[...selected.values()].map((r) => (
+            <li key={r.id} className="flex items-center justify-between gap-3 px-3.5 py-2">
+              <span className="truncate font-medium text-slate-800">{r.name}</span>
+              <span className="shrink-0 font-mono text-xs text-slate-500">{r.regNo}</span>
+            </li>
+          ))}
+        </ul>
       </Dialog>
 
       {dialog}

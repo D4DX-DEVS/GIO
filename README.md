@@ -46,7 +46,7 @@ gio/
 │       ├── pages/Register.tsx                 # public form (/register)
 │       ├── pages/admin/website/               # Website: page content, lists, images
 │       ├── pages/admin/Login.tsx              # /admin/login
-│       ├── pages/admin/Dashboard.tsx          # /admin list, search, sort, filters
+│       ├── pages/admin/Dashboard.tsx          # /admin list, search, sort, filters, bulk delete
 │       ├── pages/admin/RegistrationDetail.tsx # /admin/registrations/:id
 │       ├── components/ui.tsx                  # buttons, fields, badges, dialog, toasts
 │       └── lib/                               # api wrapper, auth context, types, labels
@@ -147,7 +147,9 @@ ADMIN_PASSWORD=a-password-of-at-least-10-characters
 
 The server refuses to start without them. The password is stored and compared as plain text, so keep `.env` private. Database accounts cannot sign in. To change the credentials, edit `.env` and restart the server; every existing session is signed out.
 
-The admin can do everything: list and search registrations, view and download passes, generate a pass for a registration that has none, verify passes, and edit and publish the website.
+The admin can do everything: list and search registrations, view and download passes, generate a pass for a registration that has none, verify passes, delete registrations, and edit and publish the website.
+
+**Deleting registrations** (for example test data). Tick registrations on the dashboard (the header box ticks the whole page; ticks are kept across pages and filters), then press **Delete** in the bar at the bottom. The confirmation lists every selected registration. Deleting removes the registrations and their entry passes from the database, then their pass images and photos from Spaces (a photo another registration still uses is kept). Their QR codes stop working at the gate. It cannot be undone. Registration numbers are not reused.
 
 ## Conference website
 
@@ -365,7 +367,7 @@ The tests run against an in-memory MongoDB and an in-memory stand-in for Spaces 
 | Submission (`workflow.test.js`) | Confirmed at once with its pass; the PNG is stored under `passes/` and returned as a CDN address; the download link returns the PNG as an attachment; tampered, expired and unsigned links get 404; idempotent resubmission; duplicate person; registration closed; Spaces down gives 503 `pass_failed` and the same key retries without a second registration |
 | Form (`registration.test.js`) | Version 3 rules: required fields, optional Area and Unit, phone numbers per country (India 10 digits, UAE 9, Qatar 8, unknown country), WhatsApp in another country, children names and ages with default and admin limits, gender rules, version 2 refused, the original form still accepted |
 | Auth | 401 without a session, account lockout, only the `.env` admin can sign in, credential change signs out sessions, cookie flags, CSRF header, logout revocation |
-| Admin | Detail with children, pass redirect to the CDN and download, generate pass, verify, stats, filters, search, every filter and sort, pagination |
+| Admin | Detail with children, pass redirect to the CDN and download, generate pass, verify, stats, filters, search, every filter and sort, pagination; bulk delete removes passes, pass images and unshared photos, ignores missing ids, survives Spaces being down, and refuses bad input |
 | Older records (`legacy-records.test.js`) | Registrations and passes inserted as the earlier code wrote them: "not recorded" fields, `sent` counting as issued, generate pass confirms a `submitted` record, the image of an old pass stored once on first view, stored documents not rewritten by reading |
 | Website and images (`content.test.js`) | Drafts, preview, publish, version conflicts, form rules; image type from the bytes, size limits, EXIF and GPS removed, rotation, CDN addresses, files in Spaces with public-read and cache headers, replace and delete remove the old file, failed upload saves nothing |
 
@@ -383,6 +385,7 @@ The tests run against an in-memory MongoDB and an in-memory stand-in for Spaces 
 | GET | `/api/admin/registrations/:id` | view | Details (children's names and ages), pass, history, your permissions |
 | GET | `/api/admin/registrations/:id/pass.png` | view | Redirects to the pass on the CDN; `?download=1` sends it as a download |
 | POST | `/api/admin/registrations/:id/pass/generate` | send | Generate the pass of a registration without one (confirms an older `submitted` one first) |
+| POST | `/api/admin/registrations/delete` | delete | Permanently delete `{ids}` (1 to 500) with their passes, pass images and photos. Ids that no longer exist are ignored. Returns `{deleted}`. |
 | GET | `/api/admin/stats` · `/api/admin/filters` | view | `{total, passesIssued, withoutPass, children}`; filter options (district list, areas and units from submitted data) |
 | POST | `/api/admin/passes/verify` | gate | Check a scanned QR code or a typed pass ID |
 | GET, PUT | `/api/admin/website/settings` | content | Page settings (draft, published, version); save the draft with `{draft, version}` |

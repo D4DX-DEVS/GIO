@@ -2,7 +2,7 @@
 // submission. "submitted" only remains on registrations made before that.
 export type Status = 'submitted' | 'confirmed';
 export type Role = 'admin' | 'staff';
-export type Permission = 'view' | 'approve' | 'send' | 'gate' | 'content';
+export type Permission = 'view' | 'approve' | 'send' | 'gate' | 'content' | 'delete';
 
 export type AdminProfile = { id: string; username: string; name: string; role: Role; permissions: Permission[] };
 
