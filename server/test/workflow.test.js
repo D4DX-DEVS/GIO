@@ -224,11 +224,15 @@ describe('submission', () => {
     assert.equal(spaces.keys('passes/').length, stored);
   });
 
-  test('same name + mobile is refused as a duplicate and creates no pass', async () => {
+  test('a mobile number already registered is refused as a duplicate, whatever the name, and creates no pass', async () => {
     const passes = await EntryPass.countDocuments();
-    const res = await submit(sampleV3({ name: '  asha   MENON ', mobile: '9876543210' }));
-    assert.equal(res.status, 409);
-    assert.equal(res.body.code, 'duplicate');
+    const count = await Registration.countDocuments();
+    for (const name of ['  asha   MENON ', 'Someone Else']) {
+      const res = await submit(sampleV3({ name, mobile: '9876543210' }));
+      assert.equal(res.status, 409, name);
+      assert.equal(res.body.code, 'duplicate', name);
+    }
+    assert.equal(await Registration.countDocuments(), count);
     assert.equal(await EntryPass.countDocuments(), passes);
   });
 });

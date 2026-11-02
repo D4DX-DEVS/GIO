@@ -183,7 +183,7 @@ Fields marked with a red star are required; Area and Unit are optional.
 | Photo | Required. Uploaded as soon as it is chosen (`POST /api/public/photos`): the form resizes it to at most 1200 px and sends a JPEG; the server checks it like website images (JPEG or PNG from the bytes, at least 200 px, EXIF and GPS removed), stores a JPEG of at most 900 px in Spaces and returns its key, which the submission carries. The server refuses a submission whose photo is not in Spaces. Printed on the entry pass and shown in the admin console. |
 | Place | Required (`PLACE_REQUIRED` in `config/constants.js`) |
 | Area, Unit | Optional. When given, the same character rule as Place. Stored empty when left blank. |
-| Phone number | Required. A country picker (default from `DEFAULT_COUNTRY_CODE`, India) and the national number in digits. The allowed lengths and number ranges are those of the chosen country, from libphonenumber's mobile metadata (`utils/phone.js` on the server, `lib/phone.ts` in the form; both use the same package version). India: 10 digits. Part of the duplicate rule. |
+| Phone number | Required. A country picker (default from `DEFAULT_COUNTRY_CODE`, India) and the national number in digits. The allowed lengths and number ranges are those of the chosen country, from libphonenumber's mobile metadata (`utils/phone.js` on the server, `lib/phone.ts` in the form; both use the same package version). India: 10 digits. One registration per phone number (see Duplicate protection). |
 | WhatsApp number | "Same as phone number" is ticked by default. Otherwise its own country picker and number, checked the same way. **Not** part of the duplicate rule. |
 | Gender | Asked only when an admin has entered the options (Page content, Registration). |
 | Accompanying children | Always asked. The registrant enters the number of children, then a name and age for each. Limits: the admin-set maximum and age range (Page content, Registration), or by default up to 10 children aged 0 to 17 (`CHILDREN_DEFAULTS`). |
@@ -235,7 +235,7 @@ There is no WhatsApp integration and no admin confirmation. `POST /api/public/re
 | Situation | Protection |
 |---|---|
 | Double tap or network retry on the form | `Idempotency-Key` header with a unique index on `submissionKey`. The original registration and its pass are returned and nothing new is saved. |
-| The same person registering twice | Unique index on (normalised mobile, normalised name). Returns `409`. |
+| A phone number that is already registered | One registration per phone number, whatever the name: the submission is refused with `409` (`code: duplicate`) and the message on the phone number field. Checked in `services/registrations.js`, not by a unique index on `mobile`, because registrations made before this rule share numbers. The unique index on (normalised mobile, normalised name) remains as the database backstop for the same person submitting twice at once. |
 | Two passes for one registration | Unique index on `EntryPass.registration`, plus a unique `passId` with retry on collision. The image key is saved only if none is saved yet. |
 
 ## Entry passes
@@ -364,7 +364,7 @@ The tests run against an in-memory MongoDB and an in-memory stand-in for Spaces 
 
 | Area | Covered |
 |---|---|
-| Submission (`workflow.test.js`) | Confirmed at once with its pass; the PNG is stored under `passes/` and returned as a CDN address; the download link returns the PNG as an attachment; tampered, expired and unsigned links get 404; idempotent resubmission; duplicate person; registration closed; Spaces down gives 503 `pass_failed` and the same key retries without a second registration |
+| Submission (`workflow.test.js`) | Confirmed at once with its pass; the PNG is stored under `passes/` and returned as a CDN address; the download link returns the PNG as an attachment; tampered, expired and unsigned links get 404; idempotent resubmission; phone number already registered (any name); registration closed; Spaces down gives 503 `pass_failed` and the same key retries without a second registration |
 | Form (`registration.test.js`) | Version 3 rules: required fields, optional Area and Unit, phone numbers per country (India 10 digits, UAE 9, Qatar 8, unknown country), WhatsApp in another country, children names and ages with default and admin limits, gender rules, version 2 refused, the original form still accepted |
 | Auth | 401 without a session, account lockout, only the `.env` admin can sign in, credential change signs out sessions, cookie flags, CSRF header, logout revocation |
 | Admin | Detail with children, pass redirect to the CDN and download, generate pass, verify, stats, filters, search, every filter and sort, pagination; bulk delete removes passes, pass images and unshared photos, ignores missing ids, survives Spaces being down, and refuses bad input |

@@ -11,8 +11,8 @@ const FILE_REMOVALS_AT_ONCE = 20;
 
 const nameKeyOf = (name) => name.toLocaleLowerCase('en').replace(/\s+/g, ' ').trim();
 
-const DUPLICATE = () =>
-  new HttpError(409, 'A registration with this name and mobile number already exists.', { code: 'duplicate' });
+const DUPLICATE_MESSAGE = 'This mobile number is already registered. Each mobile number can be used for one registration only.';
+const DUPLICATE = () => new HttpError(409, DUPLICATE_MESSAGE, { code: 'duplicate', fields: { mobile: DUPLICATE_MESSAGE } });
 
 /**
  * Generates the entry pass right after a submission is saved. When that
@@ -46,8 +46,11 @@ async function submit(data, submissionKey) {
     if (previous) return { registration: previous, pass: await issueForRegistrant(previous), created: false };
   }
 
+  // One registration per mobile number. Checked here rather than by a unique
+  // index on `mobile` because registrations made before this rule share
+  // numbers; the (mobile, nameKey) index still catches a same-name race.
+  if (await Registration.exists({ mobile: data.mobile })) throw DUPLICATE();
   const nameKey = nameKeyOf(data.name);
-  if (await Registration.exists({ mobile: data.mobile, nameKey })) throw DUPLICATE();
 
   const seq = await Counter.next('registration');
   const now = new Date();
