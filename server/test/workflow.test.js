@@ -1,12 +1,14 @@
 // Public registration, the entry pass every registration gets at once,
-// admin sign-in, the admin pass endpoints and the registration list.
+// admin sign-in, the admin pass endpoints, the registration list and
+// deleting registrations.
 const { test, before, after, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
-const { start, stop, login, spaces, TEST_PHOTO, sampleV3, legacyRegistration, pngSize, request, env } = require('./helpers');
+const { start, stop, login, spaces, TEST_PHOTO, sampleV3, legacyRegistration, image, pngSize, request, env } = require('./helpers');
 const { Admin, Registration, EntryPass } = require('../src/models');
 const { parseQrPayload, qrPayload } = require('../src/utils/passTokens');
+const { can } = require('../src/middleware/auth');
 
 let app;
 let admin;
@@ -222,11 +224,15 @@ describe('submission', () => {
     assert.equal(spaces.keys('passes/').length, stored);
   });
 
-  test('same name + mobile is refused as a duplicate and creates no pass', async () => {
+  test('a mobile number already registered is refused as a duplicate, whatever the name, and creates no pass', async () => {
     const passes = await EntryPass.countDocuments();
-    const res = await submit(sampleV3({ name: '  asha   MENON ', mobile: '9876543210' }));
-    assert.equal(res.status, 409);
-    assert.equal(res.body.code, 'duplicate');
+    const count = await Registration.countDocuments();
+    for (const name of ['  asha   MENON ', 'Someone Else']) {
+      const res = await submit(sampleV3({ name, mobile: '9876543210' }));
+      assert.equal(res.status, 409, name);
+      assert.equal(res.body.code, 'duplicate', name);
+    }
+    assert.equal(await Registration.countDocuments(), count);
     assert.equal(await EntryPass.countDocuments(), passes);
   });
 });
@@ -623,5 +629,99 @@ describe('listing', () => {
     const all = await Registration.find().lean();
     assert.equal(s.children, all.reduce((n, r) => n + (r.children ? r.children.length : 0), 0));
     assert.equal(s.children, 2);
+  });
+});
+
+describe('deleting registrations', () => {
+  const remove = (ids) => admin.post('/api/admin/registrations/delete').set(H).send({ ids });
+
+  test('deletes the selected registrations with their passes, pass images and photos; the rest is untouched', async () => {
+    const upload = await request(app).post('/api/public/photos').set('Content-Type', 'image/jpeg').send(image(400, 500, 'jpeg', '#336699'));
+    assert.equal(upload.status, 201, JSON.stringify(upload.body));
+    const ownPhoto = upload.body.photo;
+    const withOwnPhoto = await submitAndGetId({ name: 'Test Delete One', mobile: '9600000001', photo: ownPhoto });
+    const withSharedPhoto = await submitAndGetId({ name: 'Test Delete Two', mobile: '9600000002' });
+    // An older registration: no photo and no pass.
+    const { insertedId } = await Registration.collection.insertOne(
+      legacyRegistration({ regNo: 'REG-09300', name: 'Old Test Record', nameKey: 'old test record', mobile: '+919847000300' })
+    );
+    const kept = await submitAndGetId({ name: 'Keep Me', mobile: '9600000003' });
+
+    const ids = [withOwnPhoto, withSharedPhoto, String(insertedId)];
+    const passList = await EntryPass.find({ registration: { $in: ids } }).lean();
+    assert.equal(passList.length, 2);
+    for (const p of passList) assert.ok(spaces.objects.has(`TEST/passes/${p.imageKey}`));
+    assert.ok(spaces.objects.has(`TEST/photos/${ownPhoto}`));
+    const before = (await admin.get('/api/admin/stats')).body;
+
+    const res = await remove(ids);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.deepEqual(res.body, { deleted: 3 });
+
+    assert.equal(await Registration.countDocuments({ _id: { $in: ids } }), 0);
+    assert.equal(await EntryPass.countDocuments({ registration: { $in: ids } }), 0);
+    for (const p of passList) assert.equal(spaces.objects.has(`TEST/passes/${p.imageKey}`), false, 'pass image removed');
+    assert.equal(spaces.objects.has(`TEST/photos/${ownPhoto}`), false, 'own photo removed');
+    assert.ok(spaces.objects.has(`TEST/photos/${TEST_PHOTO}`), 'a photo other registrations use is kept');
+
+    // Their QR codes no longer pass the gate.
+    const code = qrPayload(passList[0].passId, passList[0].version);
+    assert.equal((await admin.post('/api/admin/passes/verify').set(H).send({ code })).body.reason, 'not_found');
+    assert.equal((await admin.get(`/api/admin/registrations/${withOwnPhoto}`)).status, 404);
+
+    const keptPass = await EntryPass.findOne({ registration: kept });
+    assert.ok(keptPass);
+    assert.ok(spaces.objects.has(`TEST/passes/${keptPass.imageKey}`));
+    assert.equal((await admin.get(`/api/admin/registrations/${kept}`)).status, 200);
+
+    const now = (await admin.get('/api/admin/stats')).body;
+    assert.equal(now.total, before.total - 3);
+    assert.equal(now.withoutPass, before.withoutPass - 1);
+    assert.equal(now.total, await Registration.countDocuments());
+  });
+
+  test('ids that no longer exist are ignored and a repeated id counts once', async () => {
+    const id = await submitAndGetId({ name: 'Twice Listed', mobile: '9600000004' });
+    assert.deepEqual((await remove([id, id])).body, { deleted: 1 });
+    const again = await remove([id, String(new mongoose.Types.ObjectId())]);
+    assert.equal(again.status, 200);
+    assert.deepEqual(again.body, { deleted: 0 });
+  });
+
+  test('a file that cannot be removed from Spaces does not stop the deletion', async (t) => {
+    const logged = t.mock.method(console, 'error', () => {});
+    const id = await submitAndGetId({ name: 'Storage Down', mobile: '9600000005' });
+    const pass = await EntryPass.findOne({ registration: id });
+    spaces.failDeletes = true;
+    let res;
+    try {
+      res = await remove([id]);
+    } finally {
+      spaces.failDeletes = false;
+    }
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.deepEqual(res.body, { deleted: 1 });
+    assert.equal(await Registration.countDocuments({ _id: id }), 0);
+    assert.equal(await EntryPass.countDocuments({ registration: id }), 0);
+    assert.ok(spaces.objects.has(`TEST/passes/${pass.imageKey}`), 'left in Spaces');
+    assert.ok(logged.mock.callCount() > 0, 'the failure is logged');
+  });
+
+  test('needs a session, the CSRF header, the delete permission and a valid list of ids', async () => {
+    const id = String(new mongoose.Types.ObjectId());
+    assert.equal((await request(app).post('/api/admin/registrations/delete').set(H).send({ ids: [id] })).status, 401);
+    assert.equal((await admin.post('/api/admin/registrations/delete').send({ ids: [id] })).status, 403);
+
+    assert.equal(can({ role: 'admin' }, 'delete'), true);
+    assert.equal(can({ role: 'staff' }, 'delete'), false);
+    assert.ok((await admin.get('/api/auth/me')).body.admin.permissions.includes('delete'));
+
+    const bad = [{}, { ids: [] }, { ids: id }, { ids: 'abc' }, { ids: ['not-an-id'] }, { ids: [123] }, { ids: [{ $ne: null }] }, { ids: [id, null] }];
+    for (const body of bad) {
+      assert.equal((await admin.post('/api/admin/registrations/delete').set(H).send(body)).status, 400, JSON.stringify(body));
+    }
+    const tooMany = await remove(Array.from({ length: 501 }, () => String(new mongoose.Types.ObjectId())));
+    assert.equal(tooMany.status, 400);
+    assert.match(tooMany.body.error, /at most 500/);
   });
 });

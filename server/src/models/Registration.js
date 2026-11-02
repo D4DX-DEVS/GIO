@@ -18,7 +18,8 @@ const registrationSchema = new mongoose.Schema(
   {
     regNo: { type: String, required: true, unique: true },
     name: { type: String, required: true, trim: true, maxlength: 120 },
-    // Lower-cased, whitespace-collapsed name used for duplicate detection.
+    // Lower-cased, whitespace-collapsed name, used for sorting and the
+    // (mobile, nameKey) unique index.
     nameKey: { type: String, required: true },
     age: { type: Number, required: true, min: AGE_MIN, max: AGE_MAX },
     // Stored in E.164 form, e.g. +919876543210
@@ -72,7 +73,10 @@ const registrationSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Same person registering twice with the same mobile is treated as a duplicate.
+// A mobile number may be used for one registration only; services/registrations.js
+// checks that. This index is the database backstop for the same person
+// submitting twice at once. It cannot be unique on `mobile` alone while older
+// registrations share numbers.
 registrationSchema.index({ mobile: 1, nameKey: 1 }, { unique: true });
 registrationSchema.index({ createdAt: -1 });
 registrationSchema.index({ district: 1, area: 1, unit: 1 });

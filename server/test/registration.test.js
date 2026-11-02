@@ -185,9 +185,9 @@ describe('phone numbers by country', () => {
     assert.equal(tenDigits.status, 400);
     assert.match(tenDigits.body.fields.mobile, /Enter a valid 9-digit mobile number/);
     assert.match((await submit(sampleV3({ mobileCountry: 'AE', mobile: '50123456' }))).body.fields.mobile, /9-digit/);
-    const ok = await submitOk(sampleV3({ mobileCountry: 'AE', mobile: '501234567' }));
-    assert.equal(ok.mobile, '+971501234567');
-    assert.equal(ok.whatsapp, '+971501234567', 'same as the phone number, in the same country');
+    const ok = await submitOk(sampleV3({ mobileCountry: 'AE', mobile: '501234560' }));
+    assert.equal(ok.mobile, '+971501234560');
+    assert.equal(ok.whatsapp, '+971501234560', 'same as the phone number, in the same country');
   });
 
   test('a country that is not in the list is refused on the country field', async () => {
@@ -240,11 +240,16 @@ describe('submissions', () => {
     assert.equal((await submit(sampleV3({ childAges: [3] }))).status, 400);
   });
 
-  test('duplicate rule: same name + same phone refused; the WhatsApp number is not a duplicate key', async () => {
+  test('duplicate rule: a phone number already registered is refused under any name; the WhatsApp number is not a duplicate key', async () => {
     await submitOk(sampleV3({ name: 'Dup Person', mobile: '9810000030' }));
     const dup = await submit(sampleV3({ name: 'dup  PERSON', mobile: '9810000030', whatsappSameAsMobile: false, whatsapp: '9810000031' }));
     assert.equal(dup.status, 409);
     assert.equal(dup.body.code, 'duplicate');
+    assert.match(dup.body.fields.mobile, /already registered/);
+    const otherName = await submit(sampleV3({ name: 'Different Person', mobile: '9810000030' }));
+    assert.equal(otherName.status, 409);
+    assert.equal(otherName.body.code, 'duplicate');
+    assert.equal(await Registration.countDocuments({ mobile: '+919810000030' }), 1);
     // Another person may give the same WhatsApp number (e.g. a family phone).
     await submitOk(sampleV3({ name: 'Other Person', mobile: '9810000032', whatsappSameAsMobile: false, whatsapp: '9810000030' }));
   });

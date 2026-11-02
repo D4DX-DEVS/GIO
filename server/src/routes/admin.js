@@ -193,6 +193,25 @@ router.get(
   })
 );
 
+// --- Deleting ------------------------------------------------------------------
+
+// 500 ids stay well inside the 20 KB JSON body limit.
+const DELETE_MAX = 500;
+
+// Permanently deletes the selected registrations (for example test data) with
+// their passes, pass images and photos.
+router.post(
+  '/registrations/delete',
+  requirePermission('delete'),
+  asyncHandler(async (req, res) => {
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids) || ids.length === 0) throw new HttpError(400, 'Select at least one registration to delete.');
+    if (ids.length > DELETE_MAX) throw new HttpError(400, `Delete at most ${DELETE_MAX} registrations at a time.`);
+    if (!ids.every((id) => typeof id === 'string' && mongoose.isObjectIdOrHexString(id))) throw new HttpError(400, 'Invalid id.');
+    res.json(await registrations.removeMany([...new Set(ids)], req.actor));
+  })
+);
+
 // --- Entry pass ----------------------------------------------------------------
 
 // Passes are generated at submission. This is for a registration without one

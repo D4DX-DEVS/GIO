@@ -58,12 +58,14 @@ async function login(app) {
  *   spaces.objects          Map of full object key -> { body, contentType, acl, cacheControl, modified }
  *   spaces.keys('passes/')  object keys under TEST/<prefix>, without the TEST/ folder
  *   spaces.failPuts = true  makes every upload fail, as when Spaces is unreachable
- *   spaces.reset()          empties the store, clears the failure switch and
+ *   spaces.failDeletes = true  makes every delete fail the same way
+ *   spaces.reset()          empties the store, clears the failure switches and
  *                           puts the TEST_PHOTO registrant photo back
  */
 const spaces = {
   objects: new Map(),
   failPuts: false,
+  failDeletes: false,
   folder: process.env.DO_SPACES_FOLDER,
   cdn: process.env.DO_SPACES_CDN_URL,
   keys(prefix = '') {
@@ -73,6 +75,7 @@ const spaces = {
   reset() {
     this.objects.clear();
     this.failPuts = false;
+    this.failDeletes = false;
     this.objects.set(`${this.folder}/photos/${TEST_PHOTO}`, {
       body: Buffer.from(testPhotoJpeg()),
       contentType: 'image/jpeg',
@@ -116,6 +119,7 @@ S3Client.prototype.send = async function fakeSend(command) {
       return { ContentLength: o.body.length, ContentType: o.contentType, $metadata: { httpStatusCode: 200 } };
     }
     case 'DeleteObjectCommand':
+      if (spaces.failDeletes) throw s3Error('ServiceUnavailable', 503, 'Spaces is unreachable');
       spaces.objects.delete(input.Key);
       return { $metadata: { httpStatusCode: 204 } };
     case 'ListObjectsV2Command': {

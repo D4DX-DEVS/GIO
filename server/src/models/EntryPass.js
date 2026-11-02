@@ -31,6 +31,9 @@ const entryPassSchema = new mongoose.Schema(
     // File name of the pass image in DigitalOcean Spaces (see
     // providers/assetStore.js). Empty until the image has been stored.
     imageKey: { type: String, default: '' },
+    // Pass design the stored image was drawn on (passRenderer TEMPLATE).
+    // Missing on images stored before the delegate frame.
+    imageTemplate: Number,
     issuedAt: { type: Date, default: Date.now },
     // null when issued automatically at submission.
     issuedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin', default: null },

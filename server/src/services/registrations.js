@@ -1,14 +1,18 @@
-// Registration business logic: submission and the entry pass that every
-// registration gets as soon as it is submitted.
-const { Registration, Counter } = require('../models');
+// Registration business logic: submission, the entry pass that every
+// registration gets as soon as it is submitted, and deletion.
+const { Registration, Counter, EntryPass } = require('../models');
 const { STATUS } = require('../config/constants');
 const { HttpError } = require('../utils/httpError');
+const store = require('../providers/assetStore');
 const passes = require('./passes');
+
+// Files removed from Spaces at the same time when registrations are deleted.
+const FILE_REMOVALS_AT_ONCE = 20;
 
 const nameKeyOf = (name) => name.toLocaleLowerCase('en').replace(/\s+/g, ' ').trim();
 
-const DUPLICATE = () =>
-  new HttpError(409, 'A registration with this name and mobile number already exists.', { code: 'duplicate' });
+const DUPLICATE_MESSAGE = 'This mobile number is already registered. Each mobile number can be used for one registration only.';
+const DUPLICATE = () => new HttpError(409, DUPLICATE_MESSAGE, { code: 'duplicate', fields: { mobile: DUPLICATE_MESSAGE } });
 
 /**
  * Generates the entry pass right after a submission is saved. When that
@@ -42,8 +46,11 @@ async function submit(data, submissionKey) {
     if (previous) return { registration: previous, pass: await issueForRegistrant(previous), created: false };
   }
 
+  // One registration per mobile number. Checked here rather than by a unique
+  // index on `mobile` because registrations made before this rule share
+  // numbers; the (mobile, nameKey) index still catches a same-name race.
+  if (await Registration.exists({ mobile: data.mobile })) throw DUPLICATE();
   const nameKey = nameKeyOf(data.name);
-  if (await Registration.exists({ mobile: data.mobile, nameKey })) throw DUPLICATE();
 
   const seq = await Counter.next('registration');
   const now = new Date();
@@ -107,4 +114,39 @@ async function generatePass(id, actor) {
   return { registration: await findOr404(id) };
 }
 
-module.exports = { submit, generatePass, findOr404 };
+/**
+ * Permanently deletes registrations (test data, or ones made by mistake) with
+ * their entry passes, then removes their pass images and photos from Spaces.
+ * Passes go first, so a failure part way leaves registrations that can simply
+ * be deleted again. A file that cannot be removed is logged and does not undo
+ * the deletion; `npm run assets-cleanup` lists leftover photos. Ids that no
+ * longer exist are ignored. Returns { deleted }.
+ */
+async function removeMany(ids, actor) {
+  const found = await Registration.find({ _id: { $in: ids } }).select('regNo photo').lean();
+  if (!found.length) return { deleted: 0 };
+  const foundIds = found.map((r) => r._id);
+
+  const passList = await EntryPass.find({ registration: { $in: foundIds } }).select('imageKey').lean();
+  await EntryPass.deleteMany({ registration: { $in: foundIds } });
+  const { deletedCount } = await Registration.deleteMany({ _id: { $in: foundIds } });
+  console.log(`[registrations] ${actor.name} deleted ${deletedCount}: ${found.map((r) => r.regNo).join(', ')}`);
+
+  // A photo is kept while another registration still refers to it.
+  const photoKeys = [...new Set(found.map((r) => r.photo).filter((k) => k && store.photos.KEY_RE.test(k)))];
+  const stillUsed = new Set(photoKeys.length ? await Registration.distinct('photo', { photo: { $in: photoKeys } }) : []);
+  const removals = [
+    ...passList.filter((p) => p.imageKey).map((p) => () => store.passes.remove(p.imageKey)),
+    ...photoKeys.filter((k) => !stillUsed.has(k)).map((k) => () => store.photos.remove(k)),
+  ];
+  for (let i = 0; i < removals.length; i += FILE_REMOVALS_AT_ONCE) {
+    const results = await Promise.allSettled(removals.slice(i, i + FILE_REMOVALS_AT_ONCE).map((remove) => remove()));
+    for (const r of results) {
+      if (r.status === 'rejected') console.error('[registrations] removing a file of a deleted registration failed:', r.reason);
+    }
+  }
+
+  return { deleted: deletedCount };
+}
+
+module.exports = { submit, generatePass, findOr404, removeMany };

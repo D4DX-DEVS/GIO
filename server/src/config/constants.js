@@ -14,11 +14,12 @@ const STATUSES = Object.values(STATUS);
 
 const ROLES = Object.freeze({ ADMIN: 'admin', STAFF: 'staff' });
 
-// admin: full control, including the conference website (content).
+// admin: full control, including the conference website (content) and
+// deleting registrations (delete).
 // staff: can view registrations and verify passes at the gate, but cannot
-// generate passes or edit the website.
+// generate passes, delete registrations or edit the website.
 const ROLE_PERMISSIONS = Object.freeze({
-  admin: ['view', 'approve', 'send', 'gate', 'content'],
+  admin: ['view', 'approve', 'send', 'gate', 'content', 'delete'],
   staff: ['view', 'gate'],
 });
 
