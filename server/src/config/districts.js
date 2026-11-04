@@ -21,6 +21,9 @@ const DEFAULT_DISTRICTS = [
   'Wayanad',
   'Kannur',
   'Kasaragod',
+  'Kochi City',
+  'Chennai',
+  'Bangalore',
 ];
 
 function districts() {
