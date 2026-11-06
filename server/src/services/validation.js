@@ -4,7 +4,7 @@
 // country code; input that breaks a rule is rejected, never altered until it
 // passes.
 const { z } = require('zod');
-const { AGE_MIN, AGE_MAX, FORM_VERSION, PLACE_REQUIRED } = require('../config/constants');
+const { AGE_MIN, AGE_MAX, AGE_GROUPS, FORM_VERSION, PLACE_REQUIRED } = require('../config/constants');
 const { EMPTY_PAGE, childrenRules } = require('../config/siteSchema');
 const { matchDistrict } = require('../config/districts');
 const { env } = require('../config/env');
@@ -301,6 +301,11 @@ const listQuery = z.object({
   unit: z.string().trim().max(100).optional().default(''),
   // issued: the registration has an entry pass; missing: it has none yet.
   pass: z.enum(['', 'issued', 'missing']).optional().default(''),
+  // with / without accompanying children.
+  children: z.enum(['', 'with', 'without']).optional().default(''),
+  // AGE_GROUPS keys: the registrant's age, and the age of any accompanying child.
+  age: z.enum(['', ...Object.keys(AGE_GROUPS)]).optional().default(''),
+  childAge: z.enum(['', ...Object.keys(AGE_GROUPS)]).optional().default(''),
   // ISO timestamps; the client converts the admin's local dates.
   from: z.union([z.literal(''), z.string().datetime({ offset: true })]).optional().default(''),
   to: z.union([z.literal(''), z.string().datetime({ offset: true })]).optional().default(''),

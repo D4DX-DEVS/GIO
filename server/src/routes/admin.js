@@ -1,13 +1,15 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const { Registration, EntryPass } = require('../models');
-const { PASS_STATUS } = require('../config/constants');
+const { PASS_STATUS, AGE_GROUPS } = require('../config/constants');
 const { asyncHandler, HttpError } = require('../utils/httpError');
 const { requireAuth, requirePermission, requireCsrfHeader, can } = require('../middleware/auth');
 const { parseListQuery } = require('../services/validation');
 const registrations = require('../services/registrations');
 const passes = require('../services/passes');
 const photos = require('../services/photos');
+const site = require('../services/site');
+const exportFiles = require('../services/exports');
 const { formatForDisplay } = require('../utils/phone');
 const { districts: districtList } = require('../config/districts');
 
@@ -96,44 +98,99 @@ function permissionsFor(admin) {
 
 // --- Listing ---------------------------------------------------------------
 
+function ageRange(key) {
+  const [min, max] = AGE_GROUPS[key];
+  return max === null ? { $gte: min } : { $gte: min, $lte: max };
+}
+
+// The list query (search and filters) as a MongoDB filter; shared by the list and the export.
+function listFilter(q) {
+  const filter = {};
+  if (q.district) filter.district = exactCI(q.district);
+  if (q.area) filter.area = exactCI(q.area);
+  if (q.unit) filter.unit = exactCI(q.unit);
+  if (q.pass === 'issued') filter.passStatus = { $ne: PASS_STATUS.NONE };
+  if (q.pass === 'missing') filter.passStatus = PASS_STATUS.NONE;
+  // "without" includes older registrations where children were not recorded.
+  if (q.children === 'with') filter['children.0'] = { $exists: true };
+  if (q.children === 'without') filter['children.0'] = { $exists: false };
+  if (q.age) filter.age = ageRange(q.age);
+  if (q.childAge) filter.children = { $elemMatch: { age: ageRange(q.childAge) } };
+  if (q.from || q.to) {
+    filter.createdAt = {};
+    if (q.from) filter.createdAt.$gte = new Date(q.from);
+    if (q.to) filter.createdAt.$lte = new Date(q.to);
+  }
+  if (q.search) {
+    const rx = new RegExp(escapeRegex(q.search), 'i');
+    const or = [{ name: rx }, { email: rx }, { regNo: rx }, { passId: rx }, { area: rx }, { unit: rx }, { place: rx }];
+    const digits = q.search.replace(/\D/g, '');
+    if (digits.length >= 3) or.push({ mobile: new RegExp(escapeRegex(digits)) }, { whatsapp: new RegExp(escapeRegex(digits)) });
+    filter.$or = or;
+  }
+  return filter;
+}
+
+function listSort(q) {
+  const dir = q.dir === 'asc' ? 1 : -1;
+  const SORTS = {
+    createdAt: { createdAt: dir, _id: dir },
+    name: { nameKey: dir, _id: dir },
+    age: { age: dir, createdAt: -1 },
+    district: { district: dir, nameKey: 1 },
+  };
+  return SORTS[q.sort];
+}
+
 router.get(
   '/registrations',
   requirePermission('view'),
   asyncHandler(async (req, res) => {
     const q = parseListQuery(req.query);
-    const filter = {};
-    if (q.district) filter.district = exactCI(q.district);
-    if (q.area) filter.area = exactCI(q.area);
-    if (q.unit) filter.unit = exactCI(q.unit);
-    if (q.pass === 'issued') filter.passStatus = { $ne: PASS_STATUS.NONE };
-    if (q.pass === 'missing') filter.passStatus = PASS_STATUS.NONE;
-    if (q.from || q.to) {
-      filter.createdAt = {};
-      if (q.from) filter.createdAt.$gte = new Date(q.from);
-      if (q.to) filter.createdAt.$lte = new Date(q.to);
-    }
-    if (q.search) {
-      const rx = new RegExp(escapeRegex(q.search), 'i');
-      const or = [{ name: rx }, { email: rx }, { regNo: rx }, { passId: rx }, { area: rx }, { unit: rx }, { place: rx }];
-      const digits = q.search.replace(/\D/g, '');
-      if (digits.length >= 3) or.push({ mobile: new RegExp(escapeRegex(digits)) }, { whatsapp: new RegExp(escapeRegex(digits)) });
-      filter.$or = or;
-    }
-
-    const dir = q.dir === 'asc' ? 1 : -1;
-    const SORTS = {
-      createdAt: { createdAt: dir, _id: dir },
-      name: { nameKey: dir, _id: dir },
-      age: { age: dir, createdAt: -1 },
-      district: { district: dir, nameKey: 1 },
-    };
-    const sort = SORTS[q.sort];
-
+    const filter = listFilter(q);
     const [items, total] = await Promise.all([
-      Registration.find(filter).sort(sort).skip((q.page - 1) * q.limit).limit(q.limit).lean(),
+      Registration.find(filter).sort(listSort(q)).skip((q.page - 1) * q.limit).limit(q.limit).lean(),
       Registration.countDocuments(filter),
     ]);
     res.json({ items: items.map(listItem), total, page: q.page, limit: q.limit, pages: Math.max(1, Math.ceil(total / q.limit)) });
+  })
+);
+
+// --- Export --------------------------------------------------------------------
+
+const EXPORT_MAX = 10000;
+const EXPORT_TYPES = {
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pdf: 'application/pdf',
+};
+const EXPORT_FIELDS = 'regNo name age gender mobile whatsapp email district area unit place children passStatus passId createdAt';
+
+// Every registration the list shows for the same search, filters and sort
+// (all pages, not just the one on screen), as an Excel workbook or a PDF.
+// `tz` is the admin's time zone, for the dates in the file.
+router.get(
+  '/registrations/export',
+  requirePermission('view'),
+  asyncHandler(async (req, res) => {
+    const { format } = req.query;
+    if (typeof format !== 'string' || !Object.hasOwn(EXPORT_TYPES, format)) throw new HttpError(400, 'Choose Excel or PDF.');
+    const q = parseListQuery(req.query);
+    const timeZone = exportFiles.timeZoneOf(req.query.tz);
+    const filter = listFilter(q);
+    if ((await Registration.countDocuments(filter)) > EXPORT_MAX) {
+      throw new HttpError(400, `Export at most ${EXPORT_MAX} registrations at a time. Add a filter to narrow the list.`);
+    }
+    const docs = await Registration.find(filter).sort(listSort(q)).select(EXPORT_FIELDS).lean();
+    const file =
+      format === 'xlsx'
+        ? await exportFiles.xlsx(docs, { timeZone, withChildren: can(req.admin, 'approve') })
+        : exportFiles.pdf(docs, { timeZone, summary: exportFiles.describeFilters(q, timeZone), event: (await site.getEvent()).name });
+    res.set({
+      'Content-Type': EXPORT_TYPES[format],
+      'Cache-Control': 'private, no-store',
+      'Content-Disposition': `attachment; filename="registrations-${exportFiles.isoDay(new Date(), timeZone)}.${format}"`,
+    });
+    res.send(file);
   })
 );
 

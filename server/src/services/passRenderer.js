@@ -145,4 +145,4 @@ async function renderPass(pass, photo = null) {
   return canvas.toBuffer('image/png');
 }
 
-module.exports = { renderPass, TEMPLATE };
+module.exports = { renderPass, TEMPLATE, FONT };
