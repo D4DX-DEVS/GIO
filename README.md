@@ -224,7 +224,7 @@ There is no WhatsApp integration and no admin confirmation. `POST /api/public/re
 
 **If the pass cannot be stored** (for example Spaces is unreachable), the registration is kept and the registrant sees "Your registration REG-… is saved, but your entry pass could not be created just now. Please press Submit again." Submit sends the same `Idempotency-Key`, so the same registration is returned and its pass is tried again. A registration left without a pass appears on the dashboard under **Without entry pass**, where an admin can press **Generate entry pass**.
 
-**Admins** list, search and filter registrations (Entry pass issued / No pass yet, district, area, unit, dates), and view or download each pass.
+**Admins** list, search and filter registrations (Entry pass issued / No pass yet, district, area, unit, accompanying children, registrant age group, child age group, dates), export the filtered list as Excel or PDF, and view or download each pass.
 
 **Older registrations.** Status `submitted` only remains on registrations made before this change. **Generate entry pass** confirms such a registration and issues its pass. Pass statuses `sent` and `send_failed` from the WhatsApp era both count as issued. A pass issued before images were kept in Spaces gets its image stored the first time it is viewed.
 
@@ -381,7 +381,8 @@ The tests run against an in-memory MongoDB and an in-memory stand-in for Spaces 
 | POST | `/api/public/registrations` | none | Submit `formVersion: 3, name, age, email, district, place, photo (key from /photos), area?, unit?, gender?, mobileCountry (ISO, e.g. IN), mobile (digits), whatsappSameAsMobile, whatsappCountry, whatsapp?, childrenCount, children: [{name, age}]` (optional `Idempotency-Key` header). Returns `{regNo, name, pass: {passId, imageUrl, downloadUrl}}`. |
 | GET | `/api/passes/:passId/image?v&exp&sig[&download=1]` | signed link | The registrant's pass PNG, read from Spaces |
 | POST | `/api/auth/login` · `/logout` · GET `/me` | | Session |
-| GET | `/api/admin/registrations` | view | `search, pass(issued,missing), district, area, unit, from, to, sort(createdAt,name,age,district), dir, page, limit≤100` |
+| GET | `/api/admin/registrations` | view | `search, pass(issued,missing), district, area, unit, children(with,without), age, childAge, from, to, sort(createdAt,name,age,district), dir, page, limit≤100`. `age` and `childAge` take an age group: `0-3, 4-9, 10-15, 16-20, 21-30, 31-plus`; `childAge` matches a registration with any child in the group. |
+| GET | `/api/admin/registrations/export` | view | `format(xlsx,pdf)`, `tz` (the admin's time zone, for dates) and the list's search, filters and sort; every matching registration (all pages, at most 10,000). The Excel file has children's names and ages for admins only. |
 | GET | `/api/admin/registrations/:id` | view | Details (children's names and ages), pass, history, your permissions |
 | GET | `/api/admin/registrations/:id/pass.png` | view | Redirects to the pass on the CDN; `?download=1` sends it as a download |
 | POST | `/api/admin/registrations/:id/pass/generate` | send | Generate the pass of a registration without one (confirms an older `submitted` one first) |

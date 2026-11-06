@@ -26,6 +26,18 @@ const ROLE_PERMISSIONS = Object.freeze({
 const AGE_MIN = 10;
 const AGE_MAX = 100;
 
+// Age groups for the admin list filters (registrant age and child age), as
+// inclusive [min, max]; max null = no upper limit. "Up to 3" includes 3 so no
+// age falls between groups.
+const AGE_GROUPS = Object.freeze({
+  '0-3': [0, 3],
+  '4-9': [4, 9],
+  '10-15': [10, 15],
+  '16-20': [16, 20],
+  '21-30': [21, 30],
+  '31-plus': [31, null],
+});
+
 // Registration form versions. Version 1 is the original form (name, age,
 // mobile, email, district, area, unit). Version 2 added gender, place, a
 // WhatsApp number and children's ages. Version 3 (current) makes Area and
@@ -69,6 +81,7 @@ module.exports = {
   ROLE_PERMISSIONS,
   AGE_MIN,
   AGE_MAX,
+  AGE_GROUPS,
   FORM_VERSION,
   PLACE_REQUIRED,
   FORM_RULE_LIMITS,

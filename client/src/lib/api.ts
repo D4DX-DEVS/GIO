@@ -84,6 +84,34 @@ export async function uploadFile<T>(path: string, file: Blob, fileName = ''): Pr
   return data as T;
 }
 
+/**
+ * Downloads a file from an admin GET endpoint under the name the server gives
+ * it. Fetched rather than linked, so an error shows as a message instead of
+ * a downloaded error page.
+ */
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(path, { headers: { 'X-Requested-With': 'rms' }, credentials: 'same-origin' });
+  } catch {
+    throw new ApiError(0, 'Could not reach the server. Check your internet connection and try again.');
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 && onUnauthorized) onUnauthorized();
+    throw new ApiError(res.status, data.error || 'The download failed. Please try again.', data.fields, data.code);
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 export function errorMessage(err: unknown): string {
   if (err instanceof ApiError) return err.message;
   return 'Something went wrong. Please try again.';

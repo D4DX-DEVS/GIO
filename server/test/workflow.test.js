@@ -9,6 +9,8 @@ const { start, stop, login, spaces, TEST_PHOTO, sampleV3, legacyRegistration, im
 const { Admin, Registration, EntryPass } = require('../src/models');
 const { parseQrPayload, qrPayload } = require('../src/utils/passTokens');
 const { can } = require('../src/middleware/auth');
+const ExcelJS = require('exceljs');
+const exportFiles = require('../src/services/exports');
 
 let app;
 let admin;
@@ -616,6 +618,88 @@ describe('listing', () => {
     assert.deepEqual(f.districts, ['North District', 'East District', 'West District', 'South District']);
     assert.deepEqual(f.areas.sort(), ['Hill Area', 'River Area']);
     assert.deepEqual(f.units.sort(), ['Unit 1', 'Unit 2']);
+  });
+
+  test('filters by accompanying children, registrant age group and child age group', async () => {
+    const names = async (q) => (await list({ ...q, sort: 'name', dir: 'asc', limit: 100 })).body.items.map((i) => i.name);
+
+    const withKids = (await list({ children: 'with', limit: 100 })).body;
+    assert.ok(withKids.items.length > 0 && withKids.items.every((i) => i.childrenCount > 0));
+    assert.equal(withKids.total, await Registration.countDocuments({ 'children.0': { $exists: true } }));
+    assert.deepEqual(await names({ children: 'with', district: 'South District' }), ['Dev Pillai']);
+    assert.deepEqual(await names({ children: 'without', district: 'South District' }), ['Chitra Nair']);
+    // Older registrations without the field count as without children.
+    assert.deepEqual(await names({ children: 'without', district: 'East District', area: 'Old Area' }), ['Waiting Person']);
+
+    assert.deepEqual(await names({ age: '31-plus', district: 'West District' }), ['Zara Ali']);
+    assert.deepEqual(await names({ age: '21-30', district: 'West District' }), ['Bilal Khan']);
+    assert.deepEqual(await names({ age: '16-20', district: 'West District' }), []);
+
+    // A registration matches when any of its children is in the group (Dev's are 4 and 8).
+    assert.deepEqual(await names({ childAge: '4-9', district: 'South District' }), ['Dev Pillai']);
+    assert.deepEqual(await names({ childAge: '0-3', district: 'South District' }), []);
+
+    assert.equal((await list({ age: '5-6' })).status, 400);
+    assert.equal((await list({ children: 'some' })).status, 400);
+  });
+
+  const binary = (res, cb) => {
+    const chunks = [];
+    res.on('data', (c) => chunks.push(c));
+    res.on('end', () => cb(null, Buffer.concat(chunks)));
+  };
+  const exportFile = (q) => admin.get('/api/admin/registrations/export').query(q).buffer(true).parse(binary);
+
+  test('exports the filtered list as an Excel workbook', async () => {
+    const res = await exportFile({ format: 'xlsx', district: 'South District', sort: 'name', dir: 'asc', tz: 'Asia/Kolkata' });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers['content-type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    assert.equal(res.headers['cache-control'], 'private, no-store');
+    assert.match(res.headers['content-disposition'], /^attachment; filename="registrations-\d{4}-\d{2}-\d{2}\.xlsx"$/);
+
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(res.body);
+    const ws = wb.getWorksheet('Registrations');
+    const header = ws.getRow(1).values.slice(1);
+    assert.ok(header.includes('Children (name, age)'), 'admins get the children names and ages');
+    const col = (name) => header.indexOf(name) + 1;
+    assert.equal(ws.rowCount, 3);
+    assert.deepEqual([ws.getRow(2).getCell(col('Name')).value, ws.getRow(3).getCell(col('Name')).value], ['Chitra Nair', 'Dev Pillai']);
+    const dev = ws.getRow(3);
+    assert.equal(dev.getCell(col('Children')).value, 2);
+    assert.equal(dev.getCell(col('Children (name, age)')).value, 'Kiran Pillai (4), Maya Pillai (8)');
+    assert.equal(dev.getCell(col('Mobile')).value, '+91 95000 00004');
+    assert.equal(dev.getCell(col('Entry pass')).value, 'Issued');
+    assert.ok(dev.getCell(col('Registered')).value instanceof Date);
+  });
+
+  test('exports the filtered list as a PDF', async () => {
+    const res = await exportFile({ format: 'pdf', children: 'with', tz: 'Asia/Kolkata' });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers['content-type'], 'application/pdf');
+    assert.match(res.headers['content-disposition'], /^attachment; filename="registrations-\d{4}-\d{2}-\d{2}\.pdf"$/);
+    assert.equal(res.body.subarray(0, 5).toString(), '%PDF-');
+
+    // An empty result still gives a one-page file.
+    const empty = await exportFile({ format: 'pdf', search: 'nobody-matches-this' });
+    assert.equal(empty.status, 200);
+    assert.equal(empty.body.subarray(0, 5).toString(), '%PDF-');
+  });
+
+  test('export needs a known format, valid filters and a signed-in admin', async () => {
+    assert.equal((await exportFile({})).status, 400);
+    assert.equal((await exportFile({ format: 'csv' })).status, 400);
+    assert.equal((await exportFile({ format: 'pdf', age: 'old' })).status, 400);
+    assert.equal((await request(app).get('/api/admin/registrations/export').query({ format: 'pdf' })).status, 401);
+  });
+
+  test('exports without children names and ages for staff', async () => {
+    const docs = await Registration.find({ name: 'Dev Pillai' }).lean();
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await exportFiles.xlsx(docs, { timeZone: 'UTC', withChildren: false }));
+    const header = wb.getWorksheet('Registrations').getRow(1).values.slice(1);
+    assert.ok(header.includes('Children'));
+    assert.ok(!header.includes('Children (name, age)'));
   });
 
   test('stats: total, passes issued, without a pass, and children', async () => {

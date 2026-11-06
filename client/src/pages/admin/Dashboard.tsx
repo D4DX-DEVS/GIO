@@ -14,7 +14,10 @@ import {
   ChevronRight,
   Download,
   Eye,
+  FileSpreadsheet,
+  FileText,
   Inbox,
+  Loader2,
   Mail,
   MapPin,
   Phone,
@@ -28,7 +31,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { api, errorMessage } from '../../lib/api';
+import { api, downloadFile, errorMessage } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import type { FilterOptions, ListResponse, RegistrationDetail, RegistrationItem, Stats } from '../../lib/types';
 import { formatDate } from '../../lib/format';
@@ -51,13 +54,34 @@ const SORTS: Array<[SortKey, string]> = [
 ];
 const PAGE_SIZES = ['10', '20', '50', '100'];
 
-const FILTER_KEYS = ['pass', 'district', 'area', 'unit', 'from', 'to'] as const;
+const CHILDREN_FILTERS: Array<[string, string]> = [
+  ['with', 'With children'],
+  ['without', 'Without children'],
+];
+// Keys match AGE_GROUPS on the server.
+const AGE_GROUPS: Array<[string, string]> = [
+  ['0-3', 'Up to 3'],
+  ['4-9', '4–9'],
+  ['10-15', '10–15'],
+  ['16-20', '16–20'],
+  ['21-30', '21–30'],
+  ['31-plus', '31 and above'],
+];
+// Registrants are at least 10 (the form's minimum age); children at most 25
+// (the highest limit an admin can set).
+const REGISTRANT_AGE_GROUPS = AGE_GROUPS.slice(2);
+const CHILD_AGE_GROUPS = AGE_GROUPS.slice(0, 5);
+
+const FILTER_KEYS = ['pass', 'district', 'area', 'unit', 'children', 'age', 'childAge', 'from', 'to'] as const;
 type FilterKey = (typeof FILTER_KEYS)[number];
 const FILTER_LABEL: Record<FilterKey, string> = {
   pass: 'Entry pass',
   district: 'District',
   area: 'Area',
   unit: 'Unit',
+  children: 'Children',
+  age: 'Age',
+  childAge: 'Child age',
   from: 'From',
   to: 'To',
 };
@@ -363,6 +387,7 @@ export default function Dashboard() {
   const [selected, setSelected] = useState<Map<string, RegistrationItem>>(() => new Map());
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const { ask, dialog } = useGeneratePass((res: RegistrationDetail) => {
     const { statusHistory, updatedAt, children, ...item } = res.registration;
@@ -413,7 +438,7 @@ export default function Dashboard() {
 
   const query = useMemo(() => {
     const q = new URLSearchParams();
-    for (const k of ['search', 'pass', 'district', 'area', 'unit', 'sort', 'dir', 'page', 'limit']) {
+    for (const k of ['search', 'pass', 'district', 'area', 'unit', 'children', 'age', 'childAge', 'sort', 'dir', 'page', 'limit']) {
       const v = params.get(k) ?? DEFAULTS[k];
       if (v) q.set(k, v);
     }
@@ -521,6 +546,8 @@ export default function Dashboard() {
   const chipValue = (k: FilterKey) => {
     const v = params.get(k) ?? '';
     if (k === 'pass') return PASS_FILTERS.find(([x]) => x === v)?.[1] ?? v;
+    if (k === 'children') return CHILDREN_FILTERS.find(([x]) => x === v)?.[1] ?? v;
+    if (k === 'age' || k === 'childAge') return AGE_GROUPS.find(([x]) => x === v)?.[1] ?? v;
     if (k === 'from' || k === 'to') return formatDate(`${v}T00:00:00`);
     return v;
   };
@@ -544,6 +571,9 @@ export default function Dashboard() {
       />
       <FilterSelect label="Area" value={area} allLabel="All areas" onChange={(v) => setParam({ area: v, unit: '' })} options={options.areas.map((d) => [d, d])} />
       <FilterSelect label="Unit" value={get('unit')} allLabel="All units" onChange={(v) => setParam({ unit: v })} options={options.units.map((d) => [d, d])} />
+      <FilterSelect label="Accompanying children" value={get('children')} onChange={(v) => setParam({ children: v })} options={CHILDREN_FILTERS} />
+      <FilterSelect label="Age" value={get('age')} allLabel="All ages" onChange={(v) => setParam({ age: v })} options={REGISTRANT_AGE_GROUPS} />
+      <FilterSelect label="Child age" value={get('childAge')} allLabel="All ages" onChange={(v) => setParam({ childAge: v })} options={CHILD_AGE_GROUPS} />
     </>
   );
   const dateFields = (
@@ -660,7 +690,8 @@ export default function Dashboard() {
           icon={Baby}
           tone="wine"
           note={stats ? 'Across all registrations' : ''}
-          active={false}
+          active={get('children') === 'with'}
+          onClick={() => setParam({ children: get('children') === 'with' ? '' : 'with' })}
           delay={120}
         />
       </div>
@@ -734,14 +765,19 @@ export default function Dashboard() {
               )}
             </label>
             <div className="hidden md:block md:w-[19rem]">{sortFields}</div>
-            <Button variant={activeKeys.length ? 'soft' : 'secondary'} onClick={() => setSheet(true)} className="md:hidden">
-              <SlidersHorizontal className="h-[18px] w-[18px]" aria-hidden /> Filters and sort
-              {activeKeys.length > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[11px] font-bold leading-[18px] text-white">{activeKeys.length}</span>}
-            </Button>
+            <div className="flex gap-2">
+              <Button variant={activeKeys.length ? 'soft' : 'secondary'} onClick={() => setSheet(true)} className="flex-1 md:hidden">
+                <SlidersHorizontal className="h-[18px] w-[18px]" aria-hidden /> Filters and sort
+                {activeKeys.length > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[11px] font-bold leading-[18px] text-white">{activeKeys.length}</span>}
+              </Button>
+              <Button variant="secondary" onClick={() => setExporting(true)} disabled={!data?.total} title="Download as Excel or PDF">
+                <Download className="h-4 w-4" aria-hidden /> Export
+              </Button>
+            </div>
           </div>
 
           {/* Inline filters on tablet and desktop */}
-          <div className="mt-3 hidden gap-3 md:grid md:grid-cols-3 xl:grid-cols-6">
+          <div className="mt-3 hidden gap-3 md:grid md:grid-cols-4">
             {filterFields}
             <div className="flex items-end">
               <Button variant={showDates ? 'soft' : 'secondary'} className="w-full" onClick={() => setShowDates((v) => !v)} aria-expanded={showDates}>
@@ -1094,9 +1130,71 @@ export default function Dashboard() {
         </ul>
       </Dialog>
 
+      <ExportDialog open={exporting} onClose={() => setExporting(false)} query={query} total={data?.total ?? 0} filtered={filtered} />
       {dialog}
       <PassViewer target={viewing} onClose={() => setViewing(null)} />
     </main>
+  );
+}
+
+// Exports every registration the list shows (all pages) with the same search, filters and sort.
+function ExportDialog({ open, onClose, query, total, filtered }: { open: boolean; onClose: () => void; query: string; total: number; filtered: boolean }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState<'' | 'xlsx' | 'pdf'>('');
+
+  async function run(format: 'xlsx' | 'pdf') {
+    if (busy) return;
+    setBusy(format);
+    try {
+      const q = new URLSearchParams(query);
+      q.delete('page');
+      q.delete('limit');
+      q.set('format', format);
+      q.set('tz', Intl.DateTimeFormat().resolvedOptions().timeZone);
+      await downloadFile(`/api/admin/registrations/export?${q}`, `registrations.${format}`);
+      onClose();
+    } catch (err) {
+      toast('error', errorMessage(err));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  const count = `${total.toLocaleString()} registration${total === 1 ? '' : 's'}`;
+  const option =
+    'flex flex-1 flex-col items-center gap-1.5 rounded-2xl border border-slate-200 bg-white px-4 py-5 text-center transition hover:border-brand-300 hover:bg-brand-50/50 focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-600/20 disabled:cursor-not-allowed disabled:opacity-60';
+  const formats: Array<['xlsx' | 'pdf', string, string, ComponentType<{ className?: string }>, string]> = [
+    ['xlsx', 'Excel', 'Every field, to sort and filter', FileSpreadsheet, 'text-emerald-700'],
+    ['pdf', 'PDF', 'A table to print or share', FileText, 'text-brand-600'],
+  ];
+
+  return (
+    <Dialog
+      open={open}
+      title="Export registrations"
+      description={filtered ? `${count} ${total === 1 ? 'matches' : 'match'} the current search and filters.` : `All ${count}.`}
+      icon={
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600 ring-1 ring-inset ring-brand-100">
+          <Download className="h-5 w-5" aria-hidden />
+        </span>
+      }
+      onClose={() => !busy && onClose()}
+      footer={
+        <Button variant="secondary" onClick={onClose} disabled={Boolean(busy)}>
+          Cancel
+        </Button>
+      }
+    >
+      <div className="flex flex-col gap-3 sm:flex-row">
+        {formats.map(([format, label, note, Icon, tone], i) => (
+          <button key={format} type="button" className={option} onClick={() => run(format)} disabled={Boolean(busy)} data-autofocus={i === 0 || undefined}>
+            {busy === format ? <Loader2 className={cx('h-7 w-7 animate-spin', tone)} aria-hidden /> : <Icon className={cx('h-7 w-7', tone)} />}
+            <span className="font-semibold text-slate-900">{busy === format ? 'Preparing…' : label}</span>
+            <span className="text-xs text-slate-500">{note}</span>
+          </button>
+        ))}
+      </div>
+    </Dialog>
   );
 }
 
