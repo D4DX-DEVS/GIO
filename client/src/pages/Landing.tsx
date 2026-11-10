@@ -364,6 +364,14 @@ export default function Landing() {
                   )}
                 </dl>
               )}
+              {/* Shown while registration is closed; also visible on phones, above the poster. */}
+              {!open && (
+                <div className="hero-full">
+                  <p className="hero-full-kicker">YOU’RE QUICK. WE’RE FULL.</p>
+                  <p className="hero-full-lead">Registration is now complete.</p>
+                  <p>Thank you for the overwhelming response.</p>
+                </div>
+              )}
             </div>
             <figure className="poster">
               <img src={POSTER.src} srcSet={POSTER.srcSet} sizes="(min-width: 960px) 34vw, 100vw" alt={POSTER.alt} width={720} height={960} decoding="async" />
