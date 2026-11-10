@@ -189,13 +189,14 @@
 .site .btn.is-closed,
 .site .btn.is-closed:hover { background: transparent; color: var(--c-muted); border-color: var(--c-line-strong); cursor: default; box-shadow: none; transform: none; }
 
-/* Hero. Below 960px it is the poster alone, with the register button on it;
-   the copy stays for screen readers and search engines. */
+/* Hero. Below 960px it is the poster alone, with the register button on it
+   (or the "we're full" notice above it); the rest of the copy stays for
+   screen readers and search engines. */
 .site .hero { position: relative; overflow: hidden; padding-block: 12px 20px; background: var(--c-bg); }
 .site .hero-grid { position: relative; z-index: 1; display: grid; }
 .site .hero-copy { min-width: 0; }
 @media (max-width: 959px) {
-  .site .hero-copy { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .site .hero-copy > :not(.hero-full) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .site .hero .leaf { display: none; }
 }
 @media (min-width: 960px) {
@@ -214,6 +215,14 @@
 .site .facts .fic { display: grid; place-items: center; flex: none; width: clamp(48px, 5vw, 72px); height: clamp(48px, 5vw, 72px); border-radius: 50%; background: var(--c-blush); color: var(--c-red); transition: transform 0.4s var(--ease); }
 .site .facts .fic svg { width: 46%; height: 46%; }
 .site .facts dd:hover .fic { transform: translateY(-3px) rotate(-6deg); }
+/* Registration closed notice */
+.site .hero-full { margin: 4px 0 18px; text-align: center; }
+.site .hero-full p { margin: 0; font-size: clamp(15px, 1.45vw, 21px); line-height: 1.4; color: var(--c-muted); }
+.site .hero-full .hero-full-kicker { margin-bottom: 0.45em; font-size: clamp(26px, 3.3vw, 48px); font-weight: 800; line-height: 1.02; letter-spacing: -0.01em; color: var(--c-red); background: linear-gradient(180deg, #d22c3a 15%, #961523 92%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; text-wrap: balance; }
+.site .hero-full .hero-full-lead { font-weight: 600; color: var(--c-heading); }
+@media (min-width: 960px) {
+  .site .hero-full { margin: clamp(26px, 3.2vw, 46px) 0 0 1.9vw; padding-left: 1.9vw; border-left: 3px solid var(--c-red); text-align: left; }
+}
 .site .poster { position: relative; margin: 0; }
 .site .poster img { display: block; width: 100%; height: auto; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 14px; background: #2a0307; }
 .site .poster-reg { position: absolute; left: 7%; right: 7%; bottom: 3%; min-height: 50px; font-size: 16.5px; }
