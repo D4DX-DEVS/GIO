@@ -87,6 +87,7 @@ export function socialLinks(p: Pick<PublicPage, 'facebook' | 'instagram' | 'yout
 export const FALLBACK_SITE: PublicSite = {
   preview: false,
   registrationOpen: true,
+  showRegisterButton: true,
   publishedAt: null,
   page: {
     presenter: 'GIO Keralam presents',

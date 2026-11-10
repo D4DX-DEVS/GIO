@@ -6,4 +6,5 @@ module.exports = {
   EntryPass: require('./EntryPass'),
   Registration: require('./Registration'),
   SiteSettings: require('./SiteSettings'),
+  SiteSwitches: require('./SiteSwitches'),
 };

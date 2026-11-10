@@ -8,7 +8,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowRight, BookOpen, CalendarDays, FileText, MapPin, MessageSquareText, UserRound } from 'lucide-react';
 import '../site.css';
 import { api, ApiError } from '../lib/api';
-import type { ItemStatus, PublicSite, SectionKey } from '../lib/types';
+import type { ItemStatus, PublicConfig, PublicSite, SectionKey } from '../lib/types';
 import { FALLBACK_SITE, Paras, Rich, initialsOf, plain, safeHref, socialLinks, timeRange } from '../lib/site';
 import { BackToTop, SiteHeader, SocialLinks } from '../components/SiteChrome';
 
@@ -22,9 +22,17 @@ function useSite(preview: boolean) {
       api<PublicSite>('/api/public/site', { signal: ctrl.signal })
         .then((site) => ({ site, source: 'live' as const }))
         // Not published yet, or the server is unreachable: show the approved details.
-        .catch((err) => {
+        .catch(async (err) => {
           if ((err as Error).name === 'AbortError') throw err;
-          return { site: FALLBACK_SITE, source: 'fallback' as const };
+          // The admin's Register Now switch applies even before anything is published.
+          const showRegisterButton = await api<PublicConfig>('/api/public/config', { signal: ctrl.signal }).then(
+            (c) => c.showRegisterButton !== false,
+            (e) => {
+              if ((e as Error).name === 'AbortError') throw e;
+              return true;
+            }
+          );
+          return { site: { ...FALLBACK_SITE, showRegisterButton }, source: 'fallback' as const };
         });
     const load = preview
       ? api<PublicSite>('/api/admin/website/preview', { signal: ctrl.signal })
@@ -250,6 +258,8 @@ export default function Landing() {
   const pv = state.source === 'preview';
   const p = site.page;
   const open = site.registrationOpen;
+  // Admin switch (Website > Page content > Registration) for the Register Now buttons.
+  const showReg = site.showRegisterButton !== false;
   // In preview, switched-off sections are still shown, outlined.
   const visible = (k: SectionKey) => p.show[k] || pv;
   const hiddenTag = (k: SectionKey) => (pv && !p.show[k] ? 'Hidden' : undefined);
@@ -304,7 +314,7 @@ export default function Landing() {
       )}
       {state.previewError && <div className="pvbar">{state.previewError} Showing the published website.</div>}
 
-      <SiteHeader nav={nav} socials={socials} actions={open && <RegisterButton open className="hdr-reg" />} menuAction={open && <RegisterButton open />} />
+      <SiteHeader nav={nav} socials={socials} actions={open && showReg && <RegisterButton open className="hdr-reg" />} menuAction={open && showReg && <RegisterButton open />} />
 
       <main id="main">
         <section className="hero" id="s-home" aria-labelledby="hero-title">
@@ -357,7 +367,7 @@ export default function Landing() {
             </div>
             <figure className="poster">
               <img src={POSTER.src} srcSet={POSTER.srcSet} sizes="(min-width: 960px) 34vw, 100vw" alt={POSTER.alt} width={720} height={960} decoding="async" />
-              {open && <RegisterButton open className="poster-reg" />}
+              {open && showReg && <RegisterButton open className="poster-reg" />}
             </figure>
           </div>
         </section>
@@ -411,7 +421,8 @@ export default function Landing() {
                 <p>Be part of a global conversation that matters.</p>
               </div>
               <div className="cta-actions">
-                <RegisterButton open={open} />
+                {/* When registration is closed, the "Registrations closed" notice shows either way. */}
+                {(showReg || !open) && <RegisterButton open={open} />}
                 <a className="btn line" href={BROCHURE_URL} target="_blank" rel="noopener noreferrer">
                   <FileText aria-hidden="true" strokeWidth={1.6} /> View Brochure
                 </a>

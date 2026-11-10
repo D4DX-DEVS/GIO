@@ -7,7 +7,7 @@
 //
 // The published settings are cached briefly; publishing clears the cache in
 // this process, and other processes pick the change up within CACHE_MS.
-const { SiteSettings, ContentItem, Asset } = require('../models');
+const { SiteSettings, SiteSwitches, ContentItem, Asset } = require('../models');
 const { env } = require('../config/env');
 const { EMPTY_PAGE, ASSET_FIELDS, plain } = require('../config/siteSchema');
 const store = require('../providers/assetStore');
@@ -70,6 +70,12 @@ async function isRegistrationOpen() {
   return page ? page.registrationOpen !== false : true;
 }
 
+/** Whether visitors see the Register Now buttons. Admin switch, applies at once (not cached). */
+async function showRegisterButton() {
+  const doc = await SiteSwitches.findById('site').select('showRegisterButton').lean();
+  return doc ? doc.showRegisterButton !== false : true;
+}
+
 // --- Website payload ---------------------------------------------------------
 
 // Images are served straight from the Spaces CDN.
@@ -110,9 +116,10 @@ function itemStatus(doc) {
  */
 async function buildSite(mode = 'published') {
   const preview = mode === 'draft';
-  const [settings, docs] = await Promise.all([
+  const [settings, docs, registerButton] = await Promise.all([
     SiteSettings.findById('site').lean(),
     ContentItem.find(preview ? {} : { published: { $ne: null } }).sort({ order: 1, createdAt: 1 }).lean(),
+    showRegisterButton(),
   ]);
   let page = complete(preview ? settings?.draft ?? null : settings?.published ?? null);
   if (!page) {
@@ -145,6 +152,7 @@ async function buildSite(mode = 'published') {
   return {
     preview,
     registrationOpen: env.registrationOpen && page.registrationOpen !== false,
+    showRegisterButton: registerButton,
     page: { ...page, logo: img(page.logo), poster: img(page.poster), aboutImage: img(page.aboutImage), form: undefined },
     programme,
     speakers: out.speaker,
@@ -155,4 +163,4 @@ async function buildSite(mode = 'published') {
   };
 }
 
-module.exports = { getPublishedPage, getEvent, getFormRules, isRegistrationOpen, invalidate, buildSite, imageView, assetUrl, complete };
+module.exports = { getPublishedPage, getEvent, getFormRules, isRegistrationOpen, showRegisterButton, invalidate, buildSite, imageView, assetUrl, complete };

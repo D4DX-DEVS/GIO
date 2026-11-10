@@ -32,6 +32,14 @@ router.post(
   asyncHandler(async (req, res) => res.json(await content.discardSettings(body(req).version, req.actor)))
 );
 
+// Register Now buttons on the website: shown or hidden at once, without publishing.
+router.get('/register-button', asyncHandler(async (_req, res) => res.json({ showRegisterButton: await site.showRegisterButton() })));
+
+router.put(
+  '/register-button',
+  asyncHandler(async (req, res) => res.json(await content.setRegisterButton(body(req).show, req.actor)))
+);
+
 // What the website would look like with every draft published.
 router.get(
   '/preview',

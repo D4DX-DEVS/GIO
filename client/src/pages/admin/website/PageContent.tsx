@@ -301,6 +301,7 @@ export default function PageContent() {
             checked={form.registrationOpen}
             onChange={(v) => set('registrationOpen', v)}
           />
+          <RegisterButtonSwitch />
           <TextArea
             label="Gender options"
             value={genderText}
@@ -395,5 +396,49 @@ export default function PageContent() {
         }
       />
     </main>
+  );
+}
+
+/**
+ * Shows or hides the Register Now buttons on the website. Saved the moment it
+ * is switched, outside Save and Publish, so it also works before the website
+ * is published.
+ */
+function RegisterButtonSwitch() {
+  const toast = useToast();
+  const [show, setShow] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api<{ showRegisterButton: boolean }>('/api/admin/website/register-button')
+      .then((r) => setShow(r.showRegisterButton))
+      .catch((err) => toast('error', errorMessage(err)));
+  }, []);
+
+  async function change(v: boolean) {
+    setBusy(true);
+    setShow(v);
+    try {
+      const r = await api<{ showRegisterButton: boolean }>('/api/admin/website/register-button', { method: 'PUT', body: { show: v } });
+      setShow(r.showRegisterButton);
+      toast('success', r.showRegisterButton ? 'Register Now buttons are now shown on the website.' : 'Register Now buttons are now hidden on the website.');
+    } catch (err) {
+      setShow(!v);
+      toast('error', errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (show === null) return <Skeleton className="h-16 rounded-xl" />;
+  return (
+    <Toggle
+      label="Show Register Now button"
+      description="The buttons in the header, under the poster and in the closing section. Applies right away; no need to save or publish."
+      checked={show}
+      onChange={(v) => {
+        if (!busy) void change(v);
+      }}
+    />
   );
 }
