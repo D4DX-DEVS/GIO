@@ -12,6 +12,7 @@ export type PublicConfig = {
   eventVenue: string;
   supportContact: string;
   registrationOpen: boolean;
+  showRegisterButton: boolean;
   ageMin: number;
   ageMax: number;
   districts: string[];
@@ -158,6 +159,8 @@ export type GalleryEntry = Marked & { image: SiteImage; caption: string };
 export type PublicSite = {
   preview: boolean;
   registrationOpen: boolean;
+  // Admin switch for the Register Now buttons; applies without publishing.
+  showRegisterButton: boolean;
   page: PublicPage;
   programme: ProgrammeEntry[];
   speakers: SpeakerEntry[];

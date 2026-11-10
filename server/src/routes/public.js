@@ -26,7 +26,12 @@ const submitLimiter = rateLimit({
 router.get(
   '/config',
   asyncHandler(async (_req, res) => {
-    const [event, form, registrationOpen] = await Promise.all([site.getEvent(), site.getFormRules(), site.isRegistrationOpen()]);
+    const [event, form, registrationOpen, showRegisterButton] = await Promise.all([
+      site.getEvent(),
+      site.getFormRules(),
+      site.isRegistrationOpen(),
+      site.showRegisterButton(),
+    ]);
     res.set('Cache-Control', 'no-cache');
     res.json({
       eventName: event.name,
@@ -34,6 +39,8 @@ router.get(
       eventVenue: event.venue,
       supportContact: event.supportContact,
       registrationOpen,
+      // Also read by the website when nothing is published yet.
+      showRegisterButton,
       ageMin: AGE_MIN,
       ageMax: AGE_MAX,
       districts: districts(),

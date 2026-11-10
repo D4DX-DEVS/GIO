@@ -3,7 +3,7 @@
 // was editing; if someone else saved in between, the write is refused (409)
 // instead of silently overwriting their change.
 const mongoose = require('mongoose');
-const { SiteSettings, ContentItem, Asset, EntryPass } = require('../models');
+const { SiteSettings, SiteSwitches, ContentItem, Asset, EntryPass } = require('../models');
 const { HttpError } = require('../utils/httpError');
 const { pageSettings, ITEM_SCHEMAS, EMPTY_PAGE, EMPTY_ITEMS, ASSET_FIELDS } = require('../config/siteSchema');
 const site = require('./site');
@@ -127,6 +127,14 @@ async function discardSettings(version, actor) {
   );
   if (!doc) throw STALE();
   return settingsView(doc.toObject());
+}
+
+// --- Switches that apply at once (no draft, no publish) ----------------------
+
+async function setRegisterButton(show, actor) {
+  if (typeof show !== 'boolean') throw new HttpError(400, 'Missing or invalid value.');
+  await SiteSwitches.updateOne({ _id: 'site' }, { $set: { showRegisterButton: show, updatedByName: actor.name } }, { upsert: true });
+  return { showRegisterButton: show };
 }
 
 // --- Items -------------------------------------------------------------------
@@ -272,6 +280,7 @@ module.exports = {
   saveSettings,
   publishSettings,
   discardSettings,
+  setRegisterButton,
   listItems,
   createItem,
   updateItem,

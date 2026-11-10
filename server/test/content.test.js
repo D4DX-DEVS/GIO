@@ -181,6 +181,34 @@ describe('page settings', () => {
     }
   });
 
+  test('the Register Now switch is shown by default and applies at once, without publishing', async () => {
+    const setSwitch = (show, agent = admin) => agent.put('/api/admin/website/register-button').set(H).send({ show });
+    const publicValues = async () => [
+      (await request(app).get('/api/public/config')).body.showRegisterButton,
+      (await request(app).get('/api/public/site')).body.showRegisterButton,
+      (await admin.get('/api/admin/website/preview')).body.showRegisterButton,
+    ];
+    assert.equal((await admin.get('/api/admin/website/register-button')).body.showRegisterButton, true);
+    assert.deepEqual(await publicValues(), [true, true, true]);
+
+    assert.equal((await request(app).put('/api/admin/website/register-button').set(H).send({ show: false })).status, 401);
+    assert.equal((await admin.put('/api/admin/website/register-button').send({ show: false })).status, 403);
+    assert.equal((await setSwitch('no')).status, 400);
+    assert.equal((await setSwitch(undefined)).status, 400);
+
+    const before = await getSettings();
+    const off = await setSwitch(false);
+    assert.equal(off.status, 200);
+    assert.deepEqual(off.body, { showRegisterButton: false });
+    assert.deepEqual(await publicValues(), [false, false, false]);
+    assert.equal((await admin.get('/api/admin/website/register-button')).body.showRegisterButton, false);
+    // The page draft and its version are untouched, so an open editor can still save.
+    assert.equal((await getSettings()).version, before.version);
+
+    assert.equal((await setSwitch(true)).status, 200);
+    assert.deepEqual(await publicValues(), [true, true, true]);
+  });
+
   test('published content survives a restart (new app, empty cache)', async () => {
     site.invalidate();
     const fresh = createApp();
