@@ -52,9 +52,9 @@ const SORTS: Array<[SortKey, string]> = [
   ['age', 'Age'],
   ['district', 'District'],
 ];
-const PAGE_SIZES = ['10', '20', '50', '100'];
+export const PAGE_SIZES = ['10', '20', '50', '100'];
 
-const CHILDREN_FILTERS: Array<[string, string]> = [
+export const CHILDREN_FILTERS: Array<[string, string]> = [
   ['with', 'With children'],
   ['without', 'Without children'],
 ];
@@ -69,7 +69,7 @@ const AGE_GROUPS: Array<[string, string]> = [
 ];
 // Registrants are at least 10 (the form's minimum age); children at most 25
 // (the highest limit an admin can set).
-const REGISTRANT_AGE_GROUPS = AGE_GROUPS.slice(2);
+export const REGISTRANT_AGE_GROUPS = AGE_GROUPS.slice(2);
 const CHILD_AGE_GROUPS = AGE_GROUPS.slice(0, 5);
 
 const FILTER_KEYS = ['pass', 'district', 'area', 'unit', 'children', 'age', 'childAge', 'from', 'to'] as const;
@@ -91,7 +91,7 @@ const DEFAULTS: Record<string, string> = { sort: 'createdAt', dir: 'desc', page:
 const startOfDay = (d: string) => (d ? new Date(`${d}T00:00:00`).toISOString() : '');
 const endOfDay = (d: string) => (d ? new Date(`${d}T23:59:59.999`).toISOString() : '');
 
-function useDebounced<T>(value: T, ms: number) {
+export function useDebounced<T>(value: T, ms: number) {
   const [v, setV] = useState(value);
   useEffect(() => {
     const t = setTimeout(() => setV(value), ms);
@@ -107,7 +107,7 @@ function greeting() {
 
 // --- Building blocks -----------------------------------------------------------
 
-function FilterSelect({
+export function FilterSelect({
   label,
   value,
   onChange,
@@ -149,7 +149,7 @@ const TONES = {
   green: { tile: 'bg-emerald-50 text-emerald-700 ring-emerald-100', bar: 'bg-emerald-600', ring: 'border-emerald-300 ring-emerald-200/70' },
 } as const;
 
-function StatCard({
+export function StatCard({
   label,
   value,
   total,
@@ -311,7 +311,7 @@ function SelectBox({
   );
 }
 
-function SortHeader({
+export function SortHeader<K extends string = SortKey>({
   label,
   sortKey,
   sort,
@@ -320,10 +320,10 @@ function SortHeader({
   className,
 }: {
   label: string;
-  sortKey: SortKey;
+  sortKey: K;
   sort: string;
   dir: string;
-  onSort: (k: SortKey) => void;
+  onSort: (k: K) => void;
   className?: string;
 }) {
   const active = sort === sortKey;
@@ -342,7 +342,7 @@ function SortHeader({
   );
 }
 
-function pageList(page: number, pages: number): Array<number | '…'> {
+export function pageList(page: number, pages: number): Array<number | '…'> {
   if (pages <= 7) return Array.from({ length: pages }, (_, i) => i + 1);
   const out: Array<number | '…'> = [1];
   const start = Math.max(2, page - 1);
@@ -1138,7 +1138,24 @@ export default function Dashboard() {
 }
 
 // Exports every registration the list shows (all pages) with the same search, filters and sort.
-function ExportDialog({ open, onClose, query, total, filtered }: { open: boolean; onClose: () => void; query: string; total: number; filtered: boolean }) {
+// The check-in and check-out pages pass their own export endpoint and noun.
+export function ExportDialog({
+  open,
+  onClose,
+  query,
+  total,
+  filtered,
+  path = '/api/admin/registrations/export',
+  noun = 'registration',
+}: {
+  open: boolean;
+  onClose: () => void;
+  query: string;
+  total: number;
+  filtered: boolean;
+  path?: string;
+  noun?: string;
+}) {
   const toast = useToast();
   const [busy, setBusy] = useState<'' | 'xlsx' | 'pdf'>('');
 
@@ -1151,7 +1168,7 @@ function ExportDialog({ open, onClose, query, total, filtered }: { open: boolean
       q.delete('limit');
       q.set('format', format);
       q.set('tz', Intl.DateTimeFormat().resolvedOptions().timeZone);
-      await downloadFile(`/api/admin/registrations/export?${q}`, `registrations.${format}`);
+      await downloadFile(`${path}?${q}`, `${noun}s.${format}`);
       onClose();
     } catch (err) {
       toast('error', errorMessage(err));
@@ -1160,7 +1177,7 @@ function ExportDialog({ open, onClose, query, total, filtered }: { open: boolean
     }
   }
 
-  const count = `${total.toLocaleString()} registration${total === 1 ? '' : 's'}`;
+  const count = `${total.toLocaleString()} ${noun}${total === 1 ? '' : 's'}`;
   const option =
     'flex flex-1 flex-col items-center gap-1.5 rounded-2xl border border-slate-200 bg-white px-4 py-5 text-center transition hover:border-brand-300 hover:bg-brand-50/50 focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-600/20 disabled:cursor-not-allowed disabled:opacity-60';
   const formats: Array<['xlsx' | 'pdf', string, string, ComponentType<{ className?: string }>, string]> = [
@@ -1171,7 +1188,7 @@ function ExportDialog({ open, onClose, query, total, filtered }: { open: boolean
   return (
     <Dialog
       open={open}
-      title="Export registrations"
+      title={`Export ${noun}s`}
       description={filtered ? `${count} ${total === 1 ? 'matches' : 'match'} the current search and filters.` : `All ${count}.`}
       icon={
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600 ring-1 ring-inset ring-brand-100">
@@ -1198,7 +1215,7 @@ function ExportDialog({ open, onClose, query, total, filtered }: { open: boolean
   );
 }
 
-function ListSkeleton() {
+export function ListSkeleton() {
   return (
     <div aria-hidden>
       <div className="grid grid-cols-1 gap-3 p-3 sm:grid-cols-2 sm:p-4 lg:hidden">
@@ -1234,4 +1251,4 @@ function ListSkeleton() {
   );
 }
 
-const childrenLabel = (n: number) => `${n} ${n === 1 ? 'child' : 'children'}`;
+export const childrenLabel = (n: number) => `${n} ${n === 1 ? 'child' : 'children'}`;

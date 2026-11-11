@@ -57,6 +57,11 @@ export type RegistrationItem = {
   hasPass: boolean;
   passGeneratedAt: string | null;
   createdAt: string;
+  // Event day attendance; null = not yet.
+  checkedInAt: string | null;
+  checkedInByName: string | null;
+  checkedOutAt: string | null;
+  checkedOutByName: string | null;
 };
 
 export type HistoryEntry = { from: Status | null; to: Status; byName: string; note: string; at: string };
@@ -90,6 +95,26 @@ export type Stats = {
 };
 
 export type FilterOptions = { districts: string[]; areas: string[]; units: string[] };
+
+// --- Event day check-in and check-out --------------------------------------------
+
+export type AttendanceAction = 'in' | 'out';
+
+/** POST /api/admin/attendance/scan. "already" carries the earlier time on the registration. */
+export type ScanResponse =
+  | { result: 'ok' | 'already' | 'not_checked_in'; action: AttendanceAction; registration: RegistrationItem }
+  | { result: 'invalid'; action: AttendanceAction; reason: string; message: string };
+
+/** Head counts; children are those registered with each person. */
+export type AttendanceStats = {
+  registrations: number;
+  checkedIn: number;
+  checkedInChildren: number;
+  checkedOut: number;
+  checkedOutChildren: number;
+  inside: number;
+  insideChildren: number;
+};
 
 // --- Conference website ------------------------------------------------------
 

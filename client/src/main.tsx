@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import { StrictMode, Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Link, Navigate, Route, Routes } from 'react-router-dom';
 import './index.css';
@@ -8,12 +8,14 @@ import Login from './pages/admin/Login';
 import AdminLayout from './pages/admin/AdminLayout';
 import Dashboard from './pages/admin/Dashboard';
 import RegistrationDetail from './pages/admin/RegistrationDetail';
+// Loaded on demand: the QR decoder is large and only the gate pages need it.
+const Attendance = lazy(() => import('./pages/admin/Attendance'));
 import PageContent from './pages/admin/website/PageContent';
 import ItemsPage, { KINDS } from './pages/admin/website/ItemsPage';
 import Images from './pages/admin/website/Images';
 import Overview from './pages/admin/website/Overview';
 import { AuthProvider, RequireAuth, RequirePermission } from './lib/auth';
-import { ToastProvider } from './components/ui';
+import { Spinner, ToastProvider } from './components/ui';
 
 function NotFound() {
   return (
@@ -49,6 +51,22 @@ createRoot(document.getElementById('root')!).render(
                   >
                     <Route index element={<Dashboard />} />
                     <Route path="registrations/:id" element={<RegistrationDetail />} />
+                    <Route
+                      path="check-in"
+                      element={
+                        <Suspense fallback={<Spinner label="Loading" />}>
+                          <Attendance key="in" mode="in" />
+                        </Suspense>
+                      }
+                    />
+                    <Route
+                      path="check-out"
+                      element={
+                        <Suspense fallback={<Spinner label="Loading" />}>
+                          <Attendance key="out" mode="out" />
+                        </Suspense>
+                      }
+                    />
                     <Route path="website" element={<RequirePermission permission="content" />}>
                       <Route index element={<PageContent />} />
                       <Route path="overview" element={<Overview />} />

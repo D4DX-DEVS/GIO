@@ -1,6 +1,8 @@
 // Registration list exports for the admin dashboard: an Excel workbook with
 // every field, and a PDF table (A4 landscape) for printing. Both take the
-// registrations the list shows for the same search, filters and sort.
+// registrations the list shows for the same search, filters and sort. The
+// check-in and check-out lists use the same files with their times added
+// (`attendance: 'in' | 'out'`).
 const ExcelJS = require('exceljs');
 const { createCanvas } = require('canvas');
 const { AGE_GROUPS, PASS_STATUS } = require('../config/constants');
@@ -54,6 +56,7 @@ function describeFilters(q, timeZone) {
   if (q.childAge) parts.push(`Child aged ${ageGroupLabel(q.childAge)}`);
   if (q.from) parts.push(`Registered from ${dateText(new Date(q.from), timeZone)}`);
   if (q.to) parts.push(`Registered to ${dateText(new Date(q.to), timeZone)}`);
+  if (q.state) parts.push(q.state === 'inside' ? 'Not checked out' : 'Checked out');
   return parts.join(' · ');
 }
 
@@ -79,8 +82,14 @@ function rowOf(r, withChildren) {
     pass: r.passStatus !== PASS_STATUS.NONE ? 'Issued' : 'Not issued',
     passId: r.passId ?? '',
     createdAt: r.createdAt,
+    checkedInAt: r.checkedInAt ?? null,
+    checkedInByName: r.checkedInByName ?? '',
+    checkedOutAt: r.checkedOutAt ?? null,
+    checkedOutByName: r.checkedOutByName ?? '',
   };
 }
+
+const ATTENDANCE_TITLES = { in: 'Check-ins', out: 'Check-outs' };
 
 // --- Excel ---------------------------------------------------------------------
 
@@ -103,14 +112,22 @@ const XLSX_COLUMNS = [
   { header: 'Registered', key: 'createdAt', width: 18, style: { numFmt: 'dd mmm yyyy hh:mm' } },
 ];
 
-async function xlsx(docs, { timeZone, withChildren }) {
+const XLSX_ATTENDANCE_COLUMNS = [
+  { header: 'Checked in', key: 'checkedInAt', width: 18, style: { numFmt: 'dd mmm yyyy hh:mm:ss' } },
+  { header: 'Checked in by', key: 'checkedInByName', width: 18 },
+  { header: 'Checked out', key: 'checkedOutAt', width: 18, style: { numFmt: 'dd mmm yyyy hh:mm:ss' } },
+  { header: 'Checked out by', key: 'checkedOutByName', width: 18 },
+];
+
+async function xlsx(docs, { timeZone, withChildren, attendance }) {
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet('Registrations', { views: [{ state: 'frozen', ySplit: 1 }] });
-  ws.columns = XLSX_COLUMNS.filter((c) => withChildren || c.key !== 'children');
+  const ws = wb.addWorksheet(ATTENDANCE_TITLES[attendance] ?? 'Registrations', { views: [{ state: 'frozen', ySplit: 1 }] });
+  ws.columns = [...XLSX_COLUMNS.filter((c) => withChildren || c.key !== 'children'), ...(attendance ? XLSX_ATTENDANCE_COLUMNS : [])];
   ws.getRow(1).font = { bold: true };
+  const at = (d) => (d ? wallClock(d, timeZone) : null);
   for (const doc of docs) {
     const row = rowOf(doc, withChildren);
-    ws.addRow({ ...row, createdAt: wallClock(row.createdAt, timeZone) });
+    ws.addRow({ ...row, createdAt: wallClock(row.createdAt, timeZone), checkedInAt: at(row.checkedInAt), checkedOutAt: at(row.checkedOutAt) });
   }
   ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: ws.columns.length } };
   return Buffer.from(await wb.xlsx.writeBuffer());
@@ -142,6 +159,17 @@ const PDF_COLUMNS = [
   { header: 'Registered', w: 60, value: (r, _i, timeZone) => dateText(r.createdAt, timeZone) },
 ];
 
+// Same width as PDF_COLUMNS: the check-in and check-out times replace the email and registration date.
+const timeText = (d, timeZone) => (d ? dateTimeText(d, timeZone) : '');
+const PDF_ATTENDANCE_COLUMNS = [
+  ...PDF_COLUMNS.slice(0, 5),
+  { header: 'District', w: 88, value: (r) => r.district },
+  { header: 'Area · Unit · Place', w: 124, value: (r) => [r.area, r.unit, r.place].filter(Boolean).join(' · ') },
+  { header: 'Children', w: 44, right: true, value: (r) => (r.childrenCount ? String(r.childrenCount) : '') },
+  { header: 'Checked in', w: 96, value: (r, _i, timeZone) => timeText(r.checkedInAt, timeZone) },
+  { header: 'Checked out', w: 96, value: (r, _i, timeZone) => timeText(r.checkedOutAt, timeZone) },
+];
+
 /** `text` cut to `width` with an ellipsis. */
 function fit(ctx, text, width) {
   if (ctx.measureText(text).width <= width) return text;
@@ -156,7 +184,9 @@ function fit(ctx, text, width) {
   return `${chars.slice(0, lo).join('').trimEnd()}…`;
 }
 
-function pdf(docs, { timeZone, summary, event }) {
+function pdf(docs, { timeZone, summary, event, attendance }) {
+  const title = ATTENDANCE_TITLES[attendance] ?? 'Registrations';
+  const columns = attendance ? PDF_ATTENDANCE_COLUMNS : PDF_COLUMNS;
   const rows = docs.map((d) => rowOf(d, false));
   const pages = Math.max(1, Math.ceil(rows.length / ROWS_PER_PAGE));
   const canvas = createCanvas(PAGE.w, PAGE.h, 'pdf');
@@ -179,7 +209,7 @@ function pdf(docs, { timeZone, summary, event }) {
     ctx.textDrawingMode = 'glyph';
     ctx.textBaseline = 'middle';
 
-    text('Registrations', PAGE.margin, PAGE.margin + 8, { size: 16, bold: true, color: BRAND });
+    text(title, PAGE.margin, PAGE.margin + 8, { size: 16, bold: true, color: BRAND });
     if (event) text(event, PAGE.w - PAGE.margin, PAGE.margin + 8, { size: 9, color: MUTED, right: true, width: inner / 2 });
     text(countLine, PAGE.margin, PAGE.margin + 30, { color: MUTED });
     if (summary) text(summary, PAGE.margin, PAGE.margin + 44, { color: MUTED, width: inner });
@@ -187,7 +217,7 @@ function pdf(docs, { timeZone, summary, event }) {
     ctx.fillStyle = BRAND;
     ctx.fillRect(PAGE.margin, TABLE_TOP, inner, HEAD_H);
     let x = PAGE.margin;
-    for (const c of PDF_COLUMNS) {
+    for (const c of columns) {
       text(c.header, c.right ? x + c.w - 4 : x + 4, TABLE_TOP + HEAD_H / 2, { size: 8, bold: true, color: '#ffffff', right: c.right, width: c.w - 8 });
       x += c.w;
     }
@@ -201,7 +231,7 @@ function pdf(docs, { timeZone, summary, event }) {
         ctx.fillRect(PAGE.margin, y, inner, ROW_H);
       }
       let cx = PAGE.margin;
-      for (const c of PDF_COLUMNS) {
+      for (const c of columns) {
         text(c.value(r, i, timeZone), c.right ? cx + c.w - 4 : cx + 4, y + ROW_H / 2, { size: 8, right: c.right, width: c.w - 8 });
         cx += c.w;
       }
@@ -219,7 +249,7 @@ function pdf(docs, { timeZone, summary, event }) {
     text(`Page ${p + 1} of ${pages}`, PAGE.w - PAGE.margin, PAGE.h - PAGE.margin, { size: 8, color: MUTED, right: true });
   }
 
-  return canvas.toBuffer('application/pdf', { title: 'Registrations', creationDate: now });
+  return canvas.toBuffer('application/pdf', { title, creationDate: now });
 }
 
 module.exports = { xlsx, pdf, timeZoneOf, describeFilters, isoDay };

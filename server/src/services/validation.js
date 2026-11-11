@@ -321,4 +321,21 @@ function parseListQuery(query) {
   return result.data;
 }
 
-module.exports = { parseRegistration, parseListQuery };
+// The check-in and check-out lists: the same search and filters as the
+// registration list, without the entry pass and registration date filters.
+const attendanceQuery = listQuery.omit({ pass: true, from: true, to: true }).extend({
+  // in: everyone checked in; out: everyone checked out.
+  type: z.enum(['in', 'out']),
+  // On the check-in list: inside (not checked out yet) or left (checked out).
+  state: z.enum(['', 'inside', 'left']).optional().default(''),
+  // time: the check-in time on the check-in list, the check-out time on the other.
+  sort: z.enum(['time', 'name', 'age', 'district']).optional().default('time'),
+});
+
+function parseAttendanceQuery(query) {
+  const result = attendanceQuery.safeParse(query ?? {});
+  if (!result.success) throw new HttpError(400, 'Invalid list parameters.', { fields: fieldErrors(result.error) });
+  return result.data;
+}
+
+module.exports = { parseRegistration, parseListQuery, parseAttendanceQuery };
