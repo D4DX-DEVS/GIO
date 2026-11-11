@@ -69,6 +69,16 @@ const registrationSchema = new mongoose.Schema(
     passStatus: { type: String, enum: PASS_STATUSES, default: PASS_STATUS.NONE, index: true },
     passGeneratedAt: { type: Date, default: null },
     passSentAt: { type: Date, default: null },
+
+    // Event day attendance (services/attendance.js): the entry pass is scanned
+    // once to check in and once to check out. null = not yet; records saved
+    // before these fields existed read the same way.
+    checkedInAt: { type: Date, default: null },
+    checkedInBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin', default: null },
+    checkedInByName: { type: String, default: '' },
+    checkedOutAt: { type: Date, default: null },
+    checkedOutBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin', default: null },
+    checkedOutByName: { type: String, default: '' },
   },
   { timestamps: true }
 );
@@ -81,6 +91,9 @@ registrationSchema.index({ mobile: 1, nameKey: 1 }, { unique: true });
 registrationSchema.index({ createdAt: -1 });
 registrationSchema.index({ district: 1, area: 1, unit: 1 });
 registrationSchema.index({ passId: 1 }, { sparse: true });
+// Check-in and check-out lists, newest first.
+registrationSchema.index({ checkedInAt: -1 });
+registrationSchema.index({ checkedOutAt: -1 });
 
 // Shape returned to admin clients.
 registrationSchema.methods.toAdminJSON = function toAdminJSON() {

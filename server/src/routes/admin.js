@@ -4,8 +4,9 @@ const { Registration, EntryPass } = require('../models');
 const { PASS_STATUS, AGE_GROUPS } = require('../config/constants');
 const { asyncHandler, HttpError } = require('../utils/httpError');
 const { requireAuth, requirePermission, requireCsrfHeader, can } = require('../middleware/auth');
-const { parseListQuery } = require('../services/validation');
+const { parseListQuery, parseAttendanceQuery } = require('../services/validation');
 const registrations = require('../services/registrations');
+const attendance = require('../services/attendance');
 const passes = require('../services/passes');
 const photos = require('../services/photos');
 const site = require('../services/site');
@@ -52,6 +53,11 @@ function listItem(r) {
     hasPass: r.passStatus !== PASS_STATUS.NONE,
     passGeneratedAt: r.passGeneratedAt,
     createdAt: r.createdAt,
+    // Event day attendance; null = not yet.
+    checkedInAt: r.checkedInAt ?? null,
+    checkedInByName: r.checkedInByName || null,
+    checkedOutAt: r.checkedOutAt ?? null,
+    checkedOutByName: r.checkedOutByName || null,
   };
 }
 
@@ -163,7 +169,8 @@ const EXPORT_TYPES = {
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   pdf: 'application/pdf',
 };
-const EXPORT_FIELDS = 'regNo name age gender mobile whatsapp email district area unit place children passStatus passId createdAt';
+const EXPORT_FIELDS =
+  'regNo name age gender mobile whatsapp email district area unit place children passStatus passId createdAt checkedInAt checkedInByName checkedOutAt checkedOutByName';
 
 // Every registration the list shows for the same search, filters and sort
 // (all pages, not just the one on screen), as an Excel workbook or a PDF.
@@ -334,6 +341,107 @@ router.post(
       pass: passView(pass, registration._id),
       registration: listItem(registration),
     });
+  })
+);
+
+// --- Check-in and check-out -----------------------------------------------------
+
+function attendanceFilter(q) {
+  const filter = listFilter(q);
+  if (q.type === 'out') {
+    filter.checkedOutAt = { $ne: null };
+  } else {
+    filter.checkedInAt = { $ne: null };
+    if (q.state === 'inside') filter.checkedOutAt = null;
+    if (q.state === 'left') filter.checkedOutAt = { $ne: null };
+  }
+  return filter;
+}
+
+function attendanceSort(q) {
+  if (q.sort !== 'time') return listSort(q);
+  const dir = q.dir === 'asc' ? 1 : -1;
+  return { [q.type === 'out' ? 'checkedOutAt' : 'checkedInAt']: dir, _id: dir };
+}
+
+const actionOf = (body) => {
+  const action = body?.action;
+  if (!attendance.ACTIONS.includes(action)) throw new HttpError(400, 'Choose check-in or check-out.');
+  return action;
+};
+
+// Records a check-in or check-out from a scanned QR code or a typed pass ID.
+// Every outcome is a 200 with `result`: ok, already (with the earlier time on
+// the registration), not_checked_in, or invalid (with the reason).
+router.post(
+  '/attendance/scan',
+  requirePermission('gate'),
+  asyncHandler(async (req, res) => {
+    const action = actionOf(req.body);
+    const code = typeof req.body?.code === 'string' ? req.body.code.slice(0, 200) : '';
+    const out = await attendance.scan(code, action, req.actor);
+    if (out.result === 'invalid') return res.json({ result: 'invalid', action, reason: out.reason, message: VERIFY_MESSAGES[out.reason] });
+    return res.json({ result: out.result, action, registration: listItem(out.registration) });
+  })
+);
+
+router.get(
+  '/attendance/stats',
+  requirePermission('view'),
+  asyncHandler(async (_req, res) => {
+    res.json(await attendance.stats());
+  })
+);
+
+router.get(
+  '/attendance',
+  requirePermission('view'),
+  asyncHandler(async (req, res) => {
+    const q = parseAttendanceQuery(req.query);
+    const filter = attendanceFilter(q);
+    const [items, total] = await Promise.all([
+      Registration.find(filter).sort(attendanceSort(q)).skip((q.page - 1) * q.limit).limit(q.limit).lean(),
+      Registration.countDocuments(filter),
+    ]);
+    res.json({ items: items.map(listItem), total, page: q.page, limit: q.limit, pages: Math.max(1, Math.ceil(total / q.limit)) });
+  })
+);
+
+// The check-in or check-out list (all pages) as Excel or PDF, like the registration export.
+router.get(
+  '/attendance/export',
+  requirePermission('view'),
+  asyncHandler(async (req, res) => {
+    const { format } = req.query;
+    if (typeof format !== 'string' || !Object.hasOwn(EXPORT_TYPES, format)) throw new HttpError(400, 'Choose Excel or PDF.');
+    const q = parseAttendanceQuery(req.query);
+    const timeZone = exportFiles.timeZoneOf(req.query.tz);
+    const filter = attendanceFilter(q);
+    if ((await Registration.countDocuments(filter)) > EXPORT_MAX) {
+      throw new HttpError(400, `Export at most ${EXPORT_MAX} people at a time. Add a filter to narrow the list.`);
+    }
+    const docs = await Registration.find(filter).sort(attendanceSort(q)).select(EXPORT_FIELDS).lean();
+    const file =
+      format === 'xlsx'
+        ? await exportFiles.xlsx(docs, { timeZone, withChildren: can(req.admin, 'approve'), attendance: q.type })
+        : exportFiles.pdf(docs, { timeZone, summary: exportFiles.describeFilters(q, timeZone), event: (await site.getEvent()).name, attendance: q.type });
+    res.set({
+      'Content-Type': EXPORT_TYPES[format],
+      'Cache-Control': 'private, no-store',
+      'Content-Disposition': `attachment; filename="check-${q.type}s-${exportFiles.isoDay(new Date(), timeZone)}.${format}"`,
+    });
+    res.send(file);
+  })
+);
+
+// Admin correction of a wrong scan; the pass can then be scanned again.
+router.post(
+  '/attendance/:id/undo',
+  requirePermission('approve'),
+  asyncHandler(async (req, res) => {
+    checkId(req.params.id);
+    const registration = await attendance.undo(req.params.id, actionOf(req.body), req.actor);
+    res.json({ registration: listItem(registration) });
   })
 );
 

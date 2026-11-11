@@ -14,9 +14,11 @@ import {
   Megaphone,
   Mic,
   ChevronRight,
+  DoorOpen,
   ExternalLink,
   LayoutDashboard,
   LogOut,
+  ScanQrCode,
   Menu,
   Ticket,
   TriangleAlert,
@@ -64,10 +66,18 @@ const NAV: Array<{ group: string; items: NavItem[] }> = [
       { label: 'Without entry pass', to: '/admin?pass=missing', icon: TriangleAlert, match: { pass: 'missing' }, count: (s) => s.withoutPass, tone: 'warn' },
     ],
   },
+  {
+    group: 'Event day',
+    items: [
+      { label: 'Check in', to: '/admin/check-in', icon: ScanQrCode, match: null },
+      { label: 'Check out', to: '/admin/check-out', icon: DoorOpen, match: null },
+    ],
+  },
 ];
 
 function isActive(item: NavItem, pathname: string, search: string) {
-  if (item.to.startsWith('/admin/website')) return pathname.replace(/\/$/, '') === item.to;
+  // Website and event day pages are matched by path.
+  if (item.to.startsWith('/admin/')) return pathname.replace(/\/$/, '') === item.to;
   if (pathname !== '/admin') return item.match === null && pathname.startsWith('/admin/registrations');
   const params = new URLSearchParams(search);
   const keys = ['pass'];
@@ -168,6 +178,8 @@ const PAGE_TITLES: Array<[RegExp, string, string]> = [
   [/^\/admin\/website\/gallery/, 'Gallery', 'Gallery images'],
   [/^\/admin\/website\/images/, 'Images', 'Image library'],
   [/^\/admin\/registrations\//, 'Registration details', 'Registration details and entry pass'],
+  [/^\/admin\/check-in/, 'Check in', 'Scan entry passes as people arrive'],
+  [/^\/admin\/check-out/, 'Check out', 'Scan entry passes as people leave'],
   [/^\/admin\/?$/, 'Dashboard', 'Registrations and entry passes'],
 ];
 
@@ -284,6 +296,7 @@ export default function AdminLayout() {
   const alerts = stats ? stats.withoutPass : 0;
   const onDetail = location.pathname.startsWith('/admin/registrations/');
   const onWebsite = location.pathname.startsWith('/admin/website');
+  const onEventDay = /^\/admin\/check-(in|out)/.test(location.pathname);
 
   return (
     <div className="min-h-dvh bg-slate-50">
@@ -336,6 +349,12 @@ export default function AdminLayout() {
                     <Link to="/admin/website" className="hover:text-brand-700">
                       Website
                     </Link>
+                    <ChevronRight className="h-3 w-3" aria-hidden />
+                    <span className="text-slate-500">{title}</span>
+                  </>
+                ) : onEventDay ? (
+                  <>
+                    <span>Event day</span>
                     <ChevronRight className="h-3 w-3" aria-hidden />
                     <span className="text-slate-500">{title}</span>
                   </>
